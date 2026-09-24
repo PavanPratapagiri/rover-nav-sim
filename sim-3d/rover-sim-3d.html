@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rover Sim 3D — A* Navigation with Wind & Threats</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root {
+    --bg: #0B0E0A; --panel: #151A14; --panel-2: #1A211A; --line: #2A322B;
+    --text: #E7EAE4; --muted: #8FA089; --moss: #7FBF8A; --amber: #E0A458;
+    --rust: #C4593F; --alert: #E8735A; --dust: #7C9CB3; --gold: #D9C77A;
+    --font-ui: 'Inter', system-ui, sans-serif; --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    box-sizing: border-box;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-ui); overflow: hidden;
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  #scene-container { position: fixed; inset: 0; }
+  #scene-container canvas { display: block; touch-action: none; }
+  .hud { position: fixed; z-index: 10; }
+  .topbar { top: calc(14px + env(safe-area-inset-top, 0px)); left: 14px; right: 14px; display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; pointer-events: none; }
+  .topbar > * { pointer-events: auto; }
+  .brand { background: rgba(21,26,20,0.88); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; max-width: 380px; }
+  .brand .kicker { font-family: var(--font-mono); font-size: 11px; color: var(--dust); margin: 0 0 4px; }
+  .brand h1 { font-size: 15px; margin: 0 0 4px; font-weight: 600; }
+  .brand p { font-size: 11.5px; color: var(--muted); margin: 0; line-height: 1.5; }
+  .status-pill { font-family: var(--font-mono); font-size: 11.5px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--line);
+    background: rgba(21,26,20,0.88); backdrop-filter: blur(6px); color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--moss); }
+  .dot.paused { background: var(--muted); }
+  .panel { position: fixed; right: 14px; top: 100px; bottom: 14px; width: 280px; max-width: calc(100vw - 28px);
+    background: rgba(21,26,20,0.92); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+  .block-title { font-size: 11px; font-weight: 600; color: var(--muted); margin: 0 0 8px; letter-spacing: 0.01em; }
+  hr.div { border: none; border-top: 1px solid var(--line); margin: 0; }
+  button { font-family: var(--font-ui); font-size: 13px; font-weight: 500; padding: 8px 12px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--moss); border-color: var(--moss); color: #0F1310; }
+  .controls-row { display: flex; gap: 7px; flex-wrap: wrap; }
+  .decision-value { font-family: var(--font-mono); font-size: 16px; font-weight: 600; }
+  .decision-value.forward { color: var(--moss); }
+  .decision-value.turn_left, .decision-value.turn_right { color: var(--amber); }
+  .decision-value.stop { color: var(--rust); }
+  .decision-value.evade_left, .decision-value.evade_right { color: var(--alert); }
+  .decision-value.arrived { color: var(--gold); }
+  .decision-value.hover { color: var(--alert); }
+  .decision-value.charging { color: var(--dust); }
+  .decision-value.depleted { color: var(--rust); }
+  .batt-track { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+  .batt-fill { height: 100%; width: 100%; background: var(--moss); border-radius: 4px; transition: width 0.15s linear; }
+  .batt-fill.low { background: var(--amber); }
+  .batt-fill.critical { background: var(--rust); }
+  .stop-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+  .stop-list li { display: flex; align-items: center; gap: 7px; }
+  .stop-list .chip { width: 8px; height: 8px; border-radius: 2px; background: var(--amber); flex: none; }
+  .stop-list li.done { color: var(--moss); }
+  .stop-list li.done .chip { background: var(--moss); }
+  .stop-list li.base .chip { background: var(--dust); border-radius: 50%; }
+  .stop-list li.now { color: var(--text); }
+  .conf-track { height: 5px; background: var(--line); border-radius: 3px; margin-top: 7px; overflow: hidden; }
+  .conf-fill { height: 100%; background: var(--dust); border-radius: 3px; }
+  .conf-label { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 5px; }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .toggle-label { font-size: 12.5px; }
+  .toggle-label .hint { display: block; font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+  .switch { position: relative; width: 38px; height: 21px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider-toggle { position: absolute; inset: 0; background: var(--line); border-radius: 20px; cursor: pointer; }
+  .slider-toggle::before { content: ""; position: absolute; width: 15px; height: 15px; left: 3px; top: 3px; background: var(--muted); border-radius: 50%; transition: transform 0.15s ease; }
+  input:checked + .slider-toggle { background: #48606E; }
+  input:checked + .slider-toggle::before { transform: translateX(17px); background: var(--dust); }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  .stat-cell .lab { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+  .stat-cell .val { font-family: var(--font-mono); font-size: 13.5px; }
+  .stat-cell .val.alertv { color: var(--alert); }
+  .stat-cell .val.goldv { color: var(--gold); }
+  .note { font-size: 11px; line-height: 1.55; color: var(--muted); }
+  .note b { color: var(--text); }
+  .canvas-hint { position: fixed; left: 14px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 10;
+    font-size: 11.5px; color: var(--muted); background: rgba(21,26,20,0.88); backdrop-filter: blur(6px);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; max-width: 300px; }
+  @media (max-width: 720px) {
+    .panel { left: 14px; right: 14px; width: auto; top: auto; bottom: 14px; height: 46vh; }
+    .canvas-hint { display: none; }
+    .brand p:not(.kicker) { display: none; }   /* keeps the status pill clear of the bottom sheet */
+  }
+</style>
+</head>
+<body>
+<div id="scene-container"></div>
+
+<div class="hud topbar">
+  <div class="brand">
+    <p class="kicker">A* PLANNING · VELOCITY-OBSTACLE AVOIDANCE · MISSIONS</p>
+    <h1>Drone nav — 3D, path-planned, wind & threat aware</h1>
+    <p>Plans around buildings with A*, dodges moving threats by predicting collisions, crabs into the wind, and runs multi-stop deliveries on a battery budget.</p>
+  </div>
+  <span class="status-pill"><span class="dot" id="statusDot"></span><span id="statusText">running</span></span>
+</div>
+
+<div class="canvas-hint" id="canvasHint">Drag to orbit · scroll to zoom · click ground to set a new destination</div>
+
+<div class="panel">
+  <div>
+    <p class="block-title">DECISION</p>
+    <span class="decision-value forward" id="decisionVal">forward</span>
+    <div class="conf-track"><div class="conf-fill" id="confFill" style="width:0%"></div></div>
+    <div class="conf-label" id="confLabel">confidence 0.00</div>
+  </div>
+
+  <hr class="div">
+
+  <div>
+    <p class="block-title">ROUTE</p>
+    <div class="conf-label" id="routeLine" style="font-size:12px;">planning…</div>
+  </div>
+
+  <hr class="div">
+
+  <div>
+    <p class="block-title">BATTERY</p>
+    <div class="batt-track"><div class="batt-fill" id="battFill"></div></div>
+    <div class="conf-label" id="battLine">100%</div>
+  </div>
+
+  <hr class="div">
+
+  <div>
+    <p class="block-title">DELIVERY MISSION</p>
+    <div class="conf-label" id="missionLine" style="font-size:11.5px; line-height:1.6;">Single trip — click the ground to fly somewhere.</div>
+    <ol class="stop-list" id="missionStops"></ol>
+    <div class="controls-row" style="margin-top:9px;">
+      <button id="btnRandomMission" style="flex:1;">Random 4-stop run</button>
+    </div>
+    <div class="toggle-row" style="margin-top:10px;">
+      <span class="toggle-label">Click adds delivery stops<span class="hint">then launch — order is optimized for you</span></span>
+      <label class="switch"><input type="checkbox" id="stopModeToggle"><span class="slider-toggle"></span></label>
+    </div>
+    <div class="controls-row" id="pendingRow" style="margin-top:9px; display:none;">
+      <button class="primary" id="btnLaunch" style="flex:1;">Launch</button>
+      <button id="btnClearStops">Clear</button>
+    </div>
+  </div>
+
+  <hr class="div">
+
+  <div>
+    <p class="block-title">QUANTUM DEMO (Qiskit, offline)</p>
+    <div class="conf-label" style="font-size:11.5px; line-height:1.6;">
+      4 candidate routes were generated classically, then a real Grover's-search circuit (2 qubits, run on Qiskit's AerSimulator) searched for the shortest one.
+    </div>
+    <div id="quantumCandidates" style="font-family:var(--font-mono); font-size:11px; margin-top:8px; display:flex; flex-direction:column; gap:3px;"></div>
+    <div class="conf-label" id="quantumResultLine" style="margin-top:6px;"></div>
+    <button id="btnFlyQuantum" style="margin-top:9px; width:100%;">Fly the Qiskit-selected route</button>
+  </div>
+
+  <hr class="div">
+
+  <div>
+    <p class="block-title">GROVER DELIVERY ORDER (Qiskit, offline)</p>
+    <div class="conf-label" style="font-size:11.5px; line-height:1.6;" id="groverIntro"></div>
+    <div id="groverSteps" style="font-family:var(--font-mono); font-size:11px; margin-top:8px; display:flex; flex-direction:column; gap:3px;"></div>
+    <div class="conf-label" id="groverResultLine" style="margin-top:6px; line-height:1.55;"></div>
+    <button id="btnFlyGrover" style="margin-top:9px; width:100%;">Fly the Grover-chosen delivery run</button>
+  </div>
+
+  <hr class="div">
+
+  <div class="controls-row">
+    <button class="primary" id="btnPlayPause">Pause</button>
+    <button id="btnReset">Reset</button>
+    <button id="btnNewDest">New destination</button>
+    <button id="btnSpeed" title="Simulation speed">1×</button>
+  </div>
+
+  <hr class="div">
+
+  <div class="toggle-row">
+    <span class="toggle-label">Moving threats<span class="hint">birds + a rogue rover</span></span>
+    <label class="switch"><input type="checkbox" id="threatsToggle" checked><span class="slider-toggle"></span></label>
+  </div>
+
+  <div class="toggle-row">
+    <span class="toggle-label">Quantum-inspired route refinement<span class="hint">classical simulated annealing — see note below</span></span>
+    <label class="switch"><input type="checkbox" id="quantumToggle" checked><span class="slider-toggle"></span></label>
+  </div>
+
+  <hr class="div">
+
+  <div>
+    <p class="block-title">WIND</p>
+    <div class="conf-label" id="windLine">— </div>
+  </div>
+
+  <hr class="div">
+
+  <div>
+    <p class="block-title">STATS</p>
+    <div class="stat-grid">
+      <div class="stat-cell"><div class="lab">time</div><div class="val" id="statTime">0.0s</div></div>
+      <div class="stat-cell"><div class="lab">wall bumps</div><div class="val" id="statCollisions">0</div></div>
+      <div class="stat-cell"><div class="lab">evasions</div><div class="val" id="statEvasions">0</div></div>
+      <div class="stat-cell"><div class="lab">struck</div><div class="val alertv" id="statHits">0</div></div>
+      <div class="stat-cell"><div class="lab">arrivals</div><div class="val goldv" id="statArrivals">0</div></div>
+      <div class="stat-cell"><div class="lab">replans</div><div class="val" id="statReplans">0</div></div>
+    </div>
+  </div>
+
+  <hr class="div">
+
+  <div class="note">
+    <b>On "quantum":</b> no real quantum computer is reachable from a browser, and one wouldn't meaningfully speed up a problem this small anyway — quantum advantage only shows up at much larger scales. What's actually running is a classical simulated-annealing pass (the same optimization idea quantum annealers are modeled on) that trims a few percent off the A*-planned route length. Labeled honestly, not simulated as "real" quantum execution.
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // =====================================================================
+  // NAVIGATION CORE — ported from a headlessly stress-tested standalone
+  // version (60+ randomized trials, verified against non-finite states,
+  // permanent stalls, and collision rates before being wired into 3D).
+  // =====================================================================
+
+  const MARGIN = 8, W = 760, H = 460;
+  const obstacles = [
+    { x: 60,  y: 130, w: 70,  h: 26 },
+    { x: 60,  y: 250, w: 46,  h: 90 },
+    { x: 160, y: 60,  w: 90,  h: 24 },
+    { x: 170, y: 160, w: 24,  h: 110 },
+    { x: 150, y: 320, w: 100, h: 22 },
+    { x: 290, y: 60,  w: 22,  h: 90 },
+    { x: 260, y: 200, w: 90,  h: 22 },
+    { x: 300, y: 260, w: 22,  h: 130 },
+    { x: 380, y: 60,  w: 130, h: 24 },
+    { x: 400, y: 140, w: 24,  h: 80 },
+    { x: 430, y: 260, w: 100, h: 22 },
+    { x: 400, y: 340, w: 24,  h: 90 },
+    { x: 540, y: 100, w: 24,  h: 110 },
+    { x: 560, y: 60,  w: 100, h: 22 },
+    { x: 600, y: 200, w: 24,  h: 140 },
+    { x: 500, y: 380, w: 110, h: 22 },
+    { x: 650, y: 270, w: 80,  h: 22 },
+    { x: 690, y: 330, w: 22,  h: 60 }
+  ];
+  const START = { x: 60, y: 60 };
+
+  const PAD = 16, CELL = 10;
+  const COLS = Math.floor(W / CELL), ROWS = Math.floor(H / CELL);
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  function cellBlocked(cx, cy) {
+    const x = cx * CELL + CELL / 2, y = cy * CELL + CELL / 2;
+    if (x < MARGIN + PAD || x > W - MARGIN - PAD || y < MARGIN + PAD || y > H - MARGIN - PAD) return true;
+    for (const o of obstacles) if (x > o.x - PAD && x < o.x + o.w + PAD && y > o.y - PAD && y < o.y + o.h + PAD) return true;
+    return false;
+  }
+  function worldToCell(x, y) { return { cx: Math.floor(x / CELL), cy: Math.floor(y / CELL) }; }
+  function cellCenter(cx, cy) { return { x: cx * CELL + CELL / 2, y: cy * CELL + CELL / 2 }; }
+  function nearestWalkableCell(cx, cy) {
+    if (!cellBlocked(cx, cy)) return { cx, cy };
+    for (let r = 1; r <= 25; r++) {
+      for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const ncx = cx + dx, ncy = cy + dy;
+        if (ncx < 0 || ncx >= COLS || ncy < 0 || ncy >= ROWS) continue;
+        if (!cellBlocked(ncx, ncy)) return { cx: ncx, cy: ncy };
+      }
+    }
+    return { cx, cy };
+  }
+
+  function astar(sx, sy, gx, gy) {
+    let start = worldToCell(sx, sy), goal = worldToCell(gx, gy);
+    start = nearestWalkableCell(start.cx, start.cy);
+    goal = nearestWalkableCell(goal.cx, goal.cy);
+    const key = (cx, cy) => cx + ',' + cy;
+    const open = new Map(), gScore = new Map(), fScore = new Map(), cameFrom = new Map();
+    const startKey = key(start.cx, start.cy), goalKey = key(goal.cx, goal.cy);
+    gScore.set(startKey, 0);
+    const h = (cx, cy) => { const dx = Math.abs(cx - goal.cx), dy = Math.abs(cy - goal.cy); return (dx + dy) + (Math.SQRT2 - 2) * Math.min(dx, dy); };
+    fScore.set(startKey, h(start.cx, start.cy));
+    open.set(startKey, { cx: start.cx, cy: start.cy, f: fScore.get(startKey) });
+    const neighbors8 = [[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,Math.SQRT2],[1,-1,Math.SQRT2],[-1,1,Math.SQRT2],[-1,-1,Math.SQRT2]];
+    let iterations = 0; const MAX_ITER = COLS * ROWS * 4;
+    while (open.size > 0) {
+      iterations++; if (iterations > MAX_ITER) return null;
+      let currentKey = null, best = Infinity;
+      for (const [k, v] of open) if (v.f < best) { best = v.f; currentKey = k; }
+      const current = open.get(currentKey); open.delete(currentKey);
+      if (currentKey === goalKey) {
+        const path = []; let ck = currentKey;
+        while (ck) { const [cx, cy] = ck.split(',').map(Number); path.unshift(cellCenter(cx, cy)); ck = cameFrom.get(ck); }
+        return path;
+      }
+      for (const [dx, dy, cost] of neighbors8) {
+        const ncx = current.cx + dx, ncy = current.cy + dy;
+        if (ncx < 0 || ncx >= COLS || ncy < 0 || ncy >= ROWS) continue;
+        if (cellBlocked(ncx, ncy)) continue;
+        if (dx !== 0 && dy !== 0) { if (cellBlocked(current.cx + dx, current.cy) || cellBlocked(current.cx, current.cy + dy)) continue; }
+        const nKey = key(ncx, ncy);
+        const tentativeG = (gScore.get(currentKey) ?? Infinity) + cost;
+        if (tentativeG < (gScore.get(nKey) ?? Infinity)) {
+          cameFrom.set(nKey, currentKey); gScore.set(nKey, tentativeG);
+          const f = tentativeG + h(ncx, ncy); fScore.set(nKey, f); open.set(nKey, { cx: ncx, cy: ncy, f });
+        }
+      }
+    }
+    return null;
+  }
+
+  function segmentClear(p1, p2) {
+    const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const steps = Math.max(1, Math.ceil(dist / 4));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps, x = p1.x + (p2.x - p1.x) * t, y = p1.y + (p2.y - p1.y) * t;
+      if (x < MARGIN + PAD || x > W - MARGIN - PAD || y < MARGIN + PAD || y > H - MARGIN - PAD) return false;
+      for (const o of obstacles) if (x > o.x - PAD && x < o.x + o.w + PAD && y > o.y - PAD && y < o.y + o.h + PAD) return false;
+    }
+    return true;
+  }
+
+  function smoothPath(path) {
+    if (path.length <= 2) return path;
+    const result = [path[0]]; let i = 0;
+    while (i < path.length - 1) { let j = path.length - 1; while (j > i + 1 && !segmentClear(path[i], path[j])) j--; result.push(path[j]); i = j; }
+    return result;
+  }
+
+  // "Quantum-inspired" route refinement: classical simulated annealing —
+  // see the honest note in the UI panel about why this isn't, and
+  // couldn't be, real quantum computation running in a browser.
+  function annealPath(path, iterations) {
+    if (path.length <= 2) return { path, improvedPct: 0 };
+    const pts = path.map(p => ({ ...p }));
+    function totalLen(p) { let L = 0; for (let i = 1; i < p.length; i++) L += Math.hypot(p[i].x - p[i-1].x, p[i].y - p[i-1].y); return L; }
+    const startLen = totalLen(pts);
+    let bestPts = pts.map(p => ({ ...p })), bestLen = startLen, temp = 12;
+    for (let iter = 0; iter < iterations; iter++) {
+      temp *= 0.99;
+      const idx = 1 + Math.floor(Math.random() * (pts.length - 2));
+      const old = { ...pts[idx] };
+      const dx = (Math.random() - 0.5) * temp, dy = (Math.random() - 0.5) * temp;
+      const cand = { x: old.x + dx, y: old.y + dy };
+      if (!segmentClear(pts[idx-1], cand) || !segmentClear(cand, pts[idx+1])) continue;
+      const before = Math.hypot(pts[idx].x-pts[idx-1].x, pts[idx].y-pts[idx-1].y) + Math.hypot(pts[idx+1].x-pts[idx].x, pts[idx+1].y-pts[idx].y);
+      const after = Math.hypot(cand.x-pts[idx-1].x, cand.y-pts[idx-1].y) + Math.hypot(pts[idx+1].x-cand.x, pts[idx+1].y-cand.y);
+      const delta = after - before;
+      if (delta < 0 || Math.random() < Math.exp(-delta / Math.max(0.001, temp * 0.15))) {
+        pts[idx] = cand;
+        const curLen = totalLen(pts);
+        if (curLen < bestLen) { bestLen = curLen; bestPts = pts.map(p => ({ ...p })); }
+      }
+    }
+    if (bestLen >= startLen) return { path, improvedPct: 0 };
+    return { path: bestPts, improvedPct: ((startLen - bestLen) / startLen) * 100 };
+  }
+
+  function planPath(sx, sy, gx, gy, useQuantum) {
+    const raw = astar(sx, sy, gx, gy);
+    if (!raw) return { path: [{ x: gx, y: gy }], improvedPct: 0 };
+    const smoothed = smoothPath(raw);
+    if (!useQuantum) return { path: smoothed, improvedPct: 0 };
+    return annealPath(smoothed, 300);
+  }
+
+  function nearestObstruction(x, y) {
+    let bestDist = Infinity, bestPX = x, bestPY = y;
+    const dL = x - MARGIN, dR = (W - MARGIN) - x, dT = y - MARGIN, dB = (H - MARGIN) - y;
+    if (dL < bestDist) { bestDist = dL; bestPX = MARGIN; bestPY = y; }
+    if (dR < bestDist) { bestDist = dR; bestPX = W - MARGIN; bestPY = y; }
+    if (dT < bestDist) { bestDist = dT; bestPX = x; bestPY = MARGIN; }
+    if (dB < bestDist) { bestDist = dB; bestPX = x; bestPY = H - MARGIN; }
+    for (const o of obstacles) {
+      const cx = clamp(x, o.x, o.x + o.w), cy = clamp(y, o.y, o.y + o.h);
+      const d = Math.hypot(x - cx, y - cy);
+      if (d < bestDist) { bestDist = d; bestPX = cx; bestPY = cy; }
+    }
+    return { dist: bestDist, angle: Math.atan2(bestPY - y, bestPX - x) };
+  }
+  function wrapAngle(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
+
+  const ROVER_RADIUS = 9, ROVER_SPEED = 62, TURN_RATE = 2.6, EVADE_TURN_RATE = TURN_RATE * 1.7;
+  const MAX_RANGE = 150, DANGER = 14; // DANGER < PAD(16) so normal path-following never self-triggers avoidance
+  const GOAL_TOL = 0.12, WAYPOINT_REACH = 20, ARRIVE_RADIUS = 16;
+  const AVOID_COMMIT_TICKS = 5;
+  const STUCK_TIMEOUT = 6, EVADE_BREAK_TICKS = 20;
+  const DECISION_INTERVAL = 0.15;
+
+  const rover = { x: START.x, y: START.y, heading: 0.35 };
+  const wind = { angle: Math.random() * Math.PI * 2, speed: 0.6, maxSpeed: 1.4, gust: 0.5 };
+  const THREAT_TYPES = {
+    bird: { radius: 5, speedMin: 70, speedMax: 130, retargetMin: 1.0, retargetMax: 2.4 },
+    rogueRover: { radius: 10, speedMin: 35, speedMax: 55, retargetMin: 3, retargetMax: 6 },
+    van: { radius: 14, speedMin: 20, speedMax: 34, retargetMin: 5, retargetMax: 9 }
+  };
+  let threatsEnabled = true, useQuantum = true;
+  let threats = [];
+  function spawnThreat(kind) {
+    const cfg = THREAT_TYPES[kind];
+    const edge = Math.floor(Math.random() * 4);
+    let x, y;
+    if (edge === 0) { x = MARGIN + 4; y = Math.random() * H; }
+    else if (edge === 1) { x = W - MARGIN - 4; y = Math.random() * H; }
+    else if (edge === 2) { x = Math.random() * W; y = MARGIN + 4; }
+    else { x = Math.random() * W; y = H - MARGIN - 4; }
+    const angle = Math.random() * Math.PI * 2, speed = cfg.speedMin + Math.random() * (cfg.speedMax - cfg.speedMin);
+    return { kind, x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, radius: cfg.radius,
+      retarget: cfg.retargetMin + Math.random() * (cfg.retargetMax - cfg.retargetMin), wasHit: false };
+  }
+  function initThreats() {
+    threats = [
+      spawnThreat('bird'), spawnThreat('bird'), spawnThreat('bird'), spawnThreat('bird'), spawnThreat('bird'), spawnThreat('bird'),
+      spawnThreat('rogueRover'), spawnThreat('rogueRover'), spawnThreat('rogueRover'),
+      spawnThreat('van'), spawnThreat('van')
+    ];
+  }
+  initThreats();
+  function updateThreats(dt) {
+    if (!threatsEnabled) return;
+    for (const t of threats) {
+      const cfg = THREAT_TYPES[t.kind]; t.retarget -= dt;
+      if (t.retarget <= 0) {
+        const a = Math.random() * Math.PI * 2, s = cfg.speedMin + Math.random() * (cfg.speedMax - cfg.speedMin);
+        t.vx = Math.cos(a) * s; t.vy = Math.sin(a) * s; t.retarget = cfg.retargetMin + Math.random() * (cfg.retargetMax - cfg.retargetMin);
+      }
+      t.x += t.vx * dt; t.y += t.vy * dt;
+      if (t.x < MARGIN + t.radius) { t.x = MARGIN + t.radius; t.vx *= -1; }
+      if (t.x > W - MARGIN - t.radius) { t.x = W - MARGIN - t.radius; t.vx *= -1; }
+      if (t.y < MARGIN + t.radius) { t.y = MARGIN + t.radius; t.vy *= -1; }
+      if (t.y > H - MARGIN - t.radius) { t.y = H - MARGIN - t.radius; t.vy *= -1; }
+    }
+  }
+
+  // Real result from the Qiskit run (quantum_route_select.py), embedded
+  // verbatim — not recomputed here. 4 candidate routes were generated
+  // classically for this exact start/destination pair; Grover's search
+  // (2 qubits, AerSimulator, 2048 shots) searched for the shortest one
+  // and landed on candidate 3 with 100% of shots. See the file for the
+  // full circuit and methodology.
+  const QUANTUM_RESULT = {
+    candidates: [
+      { seed: 1, length: 798.16 }, { seed: 2, length: 802.66 },
+      { seed: 3, length: 803.59 }, { seed: 4, length: 800.03 }
+    ],
+    winnerIdx: 0,
+    shots: 2048,
+    winnerShots: 2048,
+    winningPath: [
+      { x: 65.0, y: 65.0 }, { x: 287.85, y: 171.90 }, { x: 368.76, y: 184.32 },
+      { x: 388.15, y: 247.31 }, { x: 417.04, y: 301.82 }, { x: 470.69, y: 352.06 },
+      { x: 484.75, y: 418.03 }, { x: 635.32, y: 420.58 }, { x: 685.0, y: 415.0 }
+    ]
+  };
+
+  // Real result from qiskit/grover_delivery_order.py, embedded verbatim.
+  // Grover's search (Dürr–Høyer minimum finding, 7 qubits, AerSimulator)
+  // picked the visiting order for this fixed 5-stop mission out of all
+  // 120 orders, scored with the same time model as walkTour(). Re-run the
+  // script and re-embed if the map or the battery/speed constants change —
+  // tests/stress.js checks this order is still optimal for the JS planner.
+  const GROVER_DELIVERY = {
+    stops: [{ x: 694.98, y: 149.22 }, { x: 562.02, y: 308.42 }, { x: 56.42, y: 185.52 }, { x: 312.69, y: 421.4 }, { x: 474.92, y: 156.73 }],
+    order: [3, 4, 2, 5, 1],
+    timeS: 39.9, classicalBestS: 39.9, worstS: 76.68,
+    numOrders: 120, qubits: 7,
+    oracleCalls: 329, measurements: 88,
+    thresholds: [51.8, 49.5, 46.01, 43.04, 39.9],
+    showcase: { iterations: 6, shots: 2048, hits: 2042, uniformPct: 1.67 }
+  };
+
+  let destination = { x: 690, y: 400 };
+  let planResult = planPath(rover.x, rover.y, destination.x, destination.y, useQuantum);
+  let path = planResult.path, pathImprovedPct = planResult.improvedPct;
+  let wpIdx = 0;
+  let prevRoverPos = { x: rover.x, y: rover.y };
+  let avoiding = false, avoidDir = null, avoidTicksLeft = 0;
+  let wasWallCollided = false;
+  let consecutiveEvades = 0;
+  let simTime = 0, bestDistSeen = Infinity, bestDistAt = 0;
+  let running = true;
+  let current = { decision: 'forward', confidence: 0.7 };
+  let stats = { collisions: 0, hits: 0, evasions: 0, arrivals: 0, replans: 0 };
+
+  function replan() {
+    planResult = planPath(rover.x, rover.y, destination.x, destination.y, useQuantum);
+    path = planResult.path; pathImprovedPct = planResult.improvedPct; wpIdx = 0;
+    stats.replans++;
+  }
+
+  function setDestination(d) {
+    destination = d;
+    replan();
+    bestDistSeen = Infinity; bestDistAt = simTime;
+  }
+
+  // ---- Velocity-obstacle threat avoidance --------------------------------
+  // Instead of "turn away from the single worst threat", score a fan of
+  // candidate headings (plus hovering) by predicted time-to-collision with
+  // EVERY nearby threat (constant-velocity extrapolation), static clearance
+  // ahead, and progress toward the current waypoint — then fly the best one.
+  // Only engages when the drone's current velocity is predicted to collide
+  // within VO_HORIZON, so normal path-following is untouched.
+  const VO_HORIZON = 1.6, VO_MARGIN = 5, VO_CANDIDATES = 24, VO_SCAN_RANGE = 160;
+  const LOS_PAD = ROVER_RADIUS + 2, LOS_REPLAN_COOLDOWN = 0.6;
+  const SKIP_PAD = PAD - 3, LOOKAHEAD_WAYPOINTS = 4; // skip-ahead needs more clearance than bare LOS
+  const WIND_DRIFT = 26 * 0.55; // wind.speed → px/s of drift; shared with simStep
+
+  function windVel() { return { x: Math.cos(wind.angle) * wind.speed * WIND_DRIFT, y: Math.sin(wind.angle) * wind.speed * WIND_DRIFT }; }
+
+  // Earliest time (s) at which a disc of radius R centred on the threat
+  // touches the rover, given relative position p and relative velocity w.
+  function timeToCollision(px, py, wx, wy, R) {
+    const c = px * px + py * py - R * R;
+    const b = 2 * (px * wx + py * wy);
+    // Already inside the margin: only a collision if still closing. Treating
+    // every candidate as ttc=0 here makes them all tie, and the planner
+    // then happily picks "straight through the van" on progress alone.
+    if (c < 0) return b < 0 ? 0 : Infinity;
+    const a = wx * wx + wy * wy;
+    if (a < 1e-6) return Infinity;
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) return Infinity;
+    const s = (-b - Math.sqrt(disc)) / (2 * a);
+    return s >= 0 ? s : Infinity;
+  }
+  function threatTTC(vx, vy) {
+    let ttc = Infinity;
+    for (const t of threats) {
+      const px = t.x - rover.x, py = t.y - rover.y;
+      if (px * px + py * py > VO_SCAN_RANGE * VO_SCAN_RANGE) continue;
+      ttc = Math.min(ttc, timeToCollision(px, py, t.vx - vx, t.vy - vy, ROVER_RADIUS + t.radius + VO_MARGIN));
+    }
+    return ttc;
+  }
+  // Clearance check that tolerates the drone already being inside the
+  // planner's PAD band (it often is after drift/evasion) — only real
+  // body-contact geometry counts.
+  function lineClear(p1, p2, pad) {
+    const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const steps = Math.max(1, Math.ceil(dist / 4));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps, x = p1.x + (p2.x - p1.x) * t, y = p1.y + (p2.y - p1.y) * t;
+      if (x < MARGIN + pad || x > W - MARGIN - pad || y < MARGIN + pad || y > H - MARGIN - pad) return false;
+      for (const o of obstacles) if (x > o.x - pad && x < o.x + o.w + pad && y > o.y - pad && y < o.y + o.h + pad) return false;
+    }
+    return true;
+  }
+
+  function chooseEvasion(desiredHeading) {
+    const wv = windVel();
+    const cands = [{ h: rover.heading }, { h: desiredHeading }, { hover: true }];
+    for (let i = 0; i < VO_CANDIDATES; i++) cands.push({ h: (i / VO_CANDIDATES) * Math.PI * 2 - Math.PI });
+    let best = null, bestCost = Infinity;
+    for (const c of cands) {
+      const speed = c.hover ? 0 : ROVER_SPEED;
+      const h = c.hover ? rover.heading : c.h;
+      const vx = Math.cos(h) * speed + wv.x, vy = Math.sin(h) * speed + wv.y;
+      const ttc = threatTTC(vx, vy);
+      let cost = 0;
+      if (ttc < VO_HORIZON) cost += 10 * (VO_HORIZON - ttc) / VO_HORIZON + 2;
+      if (!c.hover) {
+        const ahead = { x: rover.x + Math.cos(h) * ROVER_SPEED * 0.5, y: rover.y + Math.sin(h) * ROVER_SPEED * 0.5 };
+        if (!lineClear(rover, ahead, ROVER_RADIUS + 1)) cost += 8;
+        cost += Math.abs(wrapAngle(h - desiredHeading)) / Math.PI;           // progress
+        cost += 0.15 * Math.abs(wrapAngle(h - rover.heading)) / Math.PI;     // don't thrash
+      } else cost += 0.9;                                                    // hovering makes no progress
+      if (cost < bestCost) { bestCost = cost; best = { ...c, h, ttc }; }
+    }
+    return best;
+  }
+
+  let lastLosReplanAt = -Infinity;
+
+  function decide(roverVel) {
+    if (wpIdx >= path.length - 1) {
+      const d = Math.hypot(destination.x - rover.x, destination.y - rover.y);
+      if (d < ARRIVE_RADIUS) { consecutiveEvades = 0; return { decision: 'arrived', confidence: 1 }; }
+    } else {
+      // Only advance once the next waypoint is actually visible from here —
+      // otherwise reaching the 20px bubble early makes the drone cut the
+      // corner the planner was routing it around.
+      const wp = path[wpIdx];
+      if (Math.hypot(wp.x - rover.x, wp.y - rover.y) < WAYPOINT_REACH && lineClear(rover, path[wpIdx + 1], LOS_PAD)) wpIdx++;
+      // Skip ahead to the furthest upcoming waypoint in clear view. Without
+      // this, a replan mid-corridor starts the path at the grid cell the
+      // drone just left — behind it — and it U-turns back for it, drifts,
+      // replans again, and loops (seen burning 30% battery in a corridor).
+      for (let j = Math.min(path.length - 1, wpIdx + LOOKAHEAD_WAYPOINTS); j > wpIdx; j--) {
+        if (lineClear(rover, path[j], SKIP_PAD)) { wpIdx = j; break; }
+      }
+    }
+    let target = path[Math.min(wpIdx, path.length - 1)];
+
+    // Line-of-sight recovery: evasion or wind can push the drone somewhere
+    // its next waypoint is behind a building. Steering straight at it would
+    // mean flying into the wall, so replan from here instead.
+    if (!lineClear(rover, target, LOS_PAD) && simTime - lastLosReplanAt > LOS_REPLAN_COOLDOWN) {
+      lastLosReplanAt = simTime;
+      replan();
+      target = path[Math.min(wpIdx, path.length - 1)];
+    }
+
+    // Wind-corrected heading: aim so that air velocity + wind drift points
+    // at the target (a crab angle), rather than pointing the nose at it and
+    // letting the wind push the ground track sideways.
+    const wv = windVel();
+    const tdx = target.x - rover.x, tdy = target.y - rover.y, tdist = Math.hypot(tdx, tdy) || 1;
+    const goalHeading = Math.atan2((tdy / tdist) * ROVER_SPEED - wv.y, (tdx / tdist) * ROVER_SPEED - wv.x);
+
+    if (threatsEnabled && consecutiveEvades < EVADE_BREAK_TICKS) {
+      const nomVx = Math.cos(rover.heading) * ROVER_SPEED + wv.x, nomVy = Math.sin(rover.heading) * ROVER_SPEED + wv.y;
+      const nominalTTC = threatTTC(nomVx, nomVy);
+      if (nominalTTC < VO_HORIZON) {
+        consecutiveEvades++;
+        const pick = chooseEvasion(goalHeading);
+        const confidence = clamp(1 - nominalTTC / VO_HORIZON + 0.35, 0.35, 0.95);
+        if (pick.hover) return { decision: 'hover', confidence, threatTTC: nominalTTC };
+        const diff = wrapAngle(pick.h - rover.heading);
+        return { decision: diff < 0 ? 'evade_left' : 'evade_right', confidence,
+                 turnAmount: Math.min(Math.abs(diff), EVADE_TURN_RATE * DECISION_INTERVAL), threatTTC: nominalTTC };
+      }
+    }
+    consecutiveEvades = 0;
+
+    const nearest = nearestObstruction(rover.x, rover.y);
+    const relAngle = wrapAngle(nearest.angle - rover.heading);
+    const stillTooClose = nearest.dist < DANGER && Math.cos(relAngle) > 0.15;
+    if (avoiding && avoidTicksLeft > 0 && stillTooClose) {
+      avoidTicksLeft--;
+    } else {
+      avoiding = stillTooClose;
+      if (avoiding) {
+        const offsetDeg = (relAngle * 180 / Math.PI + 360) % 360;
+        if (Math.abs(relAngle) < 0.05) avoidDir = 'turn_left';
+        else if (offsetDeg > 0 && offsetDeg < 180) avoidDir = 'turn_left';
+        else avoidDir = 'turn_right';
+        avoidTicksLeft = AVOID_COMMIT_TICKS;
+      } else avoidDir = null;
+    }
+    if (avoiding) {
+      const confidence = clamp((DANGER - Math.min(nearest.dist, DANGER)) / DANGER + 0.4, 0.3, 0.95);
+      return { decision: avoidDir, confidence };
+    }
+
+    const headingDiff = wrapAngle(goalHeading - rover.heading);
+    if (Math.abs(headingDiff) > GOAL_TOL) {
+      const decision = headingDiff > 0 ? 'turn_right' : 'turn_left';
+      const turnAmount = clamp(Math.abs(headingDiff), 0, TURN_RATE * DECISION_INTERVAL);
+      const confidence = clamp(1 - Math.abs(headingDiff) / Math.PI, 0.4, 0.95);
+      return { decision, confidence, turnAmount };
+    }
+    return { decision: 'forward', confidence: clamp(1, 0.6, 0.97) };
+  }
+
+  function applyDecision(result) {
+    const dt = DECISION_INTERVAL, { decision, turnAmount } = result;
+    if (decision === 'forward') {
+      rover.x += Math.cos(rover.heading) * ROVER_SPEED * dt;
+      rover.y += Math.sin(rover.heading) * ROVER_SPEED * dt;
+    } else if (decision === 'turn_left') {
+      rover.heading -= (turnAmount !== undefined ? turnAmount : TURN_RATE * dt);
+      rover.x += Math.cos(rover.heading) * ROVER_SPEED * 0.8 * dt;
+      rover.y += Math.sin(rover.heading) * ROVER_SPEED * 0.8 * dt;
+    } else if (decision === 'turn_right') {
+      rover.heading += (turnAmount !== undefined ? turnAmount : TURN_RATE * dt);
+      rover.x += Math.cos(rover.heading) * ROVER_SPEED * 0.8 * dt;
+      rover.y += Math.sin(rover.heading) * ROVER_SPEED * 0.8 * dt;
+    } else if (decision === 'evade_left') {
+      rover.heading -= (turnAmount !== undefined ? turnAmount : EVADE_TURN_RATE * dt);
+      rover.x += Math.cos(rover.heading) * ROVER_SPEED * 0.9 * dt;
+      rover.y += Math.sin(rover.heading) * ROVER_SPEED * 0.9 * dt;
+    } else if (decision === 'evade_right') {
+      rover.heading += (turnAmount !== undefined ? turnAmount : EVADE_TURN_RATE * dt);
+      rover.x += Math.cos(rover.heading) * ROVER_SPEED * 0.9 * dt;
+      rover.y += Math.sin(rover.heading) * ROVER_SPEED * 0.9 * dt;
+    }
+    rover.heading = wrapAngle(rover.heading);
+    // 'hover' and 'arrived': hold position
+  }
+
+  function resolveCollisions() {
+    let collided = false;
+    if (rover.x < MARGIN + ROVER_RADIUS) { rover.x = MARGIN + ROVER_RADIUS; collided = true; }
+    if (rover.x > W - MARGIN - ROVER_RADIUS) { rover.x = W - MARGIN - ROVER_RADIUS; collided = true; }
+    if (rover.y < MARGIN + ROVER_RADIUS) { rover.y = MARGIN + ROVER_RADIUS; collided = true; }
+    if (rover.y > H - MARGIN - ROVER_RADIUS) { rover.y = H - MARGIN - ROVER_RADIUS; collided = true; }
+    for (const o of obstacles) {
+      const cx = clamp(rover.x, o.x, o.x + o.w), cy = clamp(rover.y, o.y, o.y + o.h);
+      const dx = rover.x - cx, dy = rover.y - cy, d = Math.hypot(dx, dy);
+      if (d < ROVER_RADIUS) {
+        collided = true;
+        const push = (ROVER_RADIUS - d) + 0.5;
+        if (d > 0.001) { rover.x += (dx / d) * push; rover.y += (dy / d) * push; } else rover.x += push;
+        rover.heading += Math.PI * 0.5 * (Math.random() < 0.5 ? 1 : -1) * 0.3;
+      }
+    }
+    if (collided && !wasWallCollided) stats.collisions++;
+    wasWallCollided = collided;
+    if (threatsEnabled) {
+      for (const t of threats) {
+        const dx = rover.x - t.x, dy = rover.y - t.y, d = Math.hypot(dx, dy), minD = ROVER_RADIUS + t.radius;
+        const isHit = d < minD;
+        if (isHit && !t.wasHit) {
+          stats.hits++;
+          const push = (minD - d) + 1;
+          // Bounce the threat directly away at its full speed. (Scaling each
+          // axis by its own old |vx|/|vy| left a threat moving perpendicular
+          // to the contact with ~zero separating speed, so it stayed stuck to
+          // the drone and re-struck every few ticks — up to 8 times in a row.)
+          const tSpeed = Math.max(Math.hypot(t.vx, t.vy), 30);
+          if (d > 0.001) { rover.x += (dx / d) * push; rover.y += (dy / d) * push; t.vx = -(dx / d) * tSpeed; t.vy = -(dy / d) * tSpeed; }
+        }
+        t.wasHit = isHit;
+      }
+    }
+  }
+
+  function decisionTick() {
+    simTime += DECISION_INTERVAL;
+    if (battery.depleted) { current = { decision: 'depleted', confidence: 1 }; return; }
+    if (battery.charging) {
+      updateBattery('charging', DECISION_INTERVAL);
+      current = { decision: 'charging', confidence: battery.charge / 100 };
+      prevRoverPos = { x: rover.x, y: rover.y };
+      return;
+    }
+    if (!missionComplete) {
+      checkReturnToBase();
+      const curDist = Math.hypot(destination.x - rover.x, destination.y - rover.y);
+      if (curDist < bestDistSeen - 2) { bestDistSeen = curDist; bestDistAt = simTime; }
+      if (simTime - bestDistAt > STUCK_TIMEOUT) { replan(); bestDistAt = simTime; }
+    }
+
+    const roverVel = { vx: (rover.x - prevRoverPos.x) / DECISION_INTERVAL, vy: (rover.y - prevRoverPos.y) / DECISION_INTERVAL };
+    const result = decide(roverVel);
+    current = result;
+    // Arrival is tracked per leg, not as a "wasn't arrived → arrived"
+    // transition: two stops closer than ARRIVE_RADIUS meant landing on one
+    // already counted as "arrived" at the next, so it never registered and
+    // the drone sat there forever.
+    if (result.decision === 'arrived' && !missionComplete && lastArrivedLeg !== currentLeg()) {
+      lastArrivedLeg = currentLeg(); stats.arrivals++; onArrive();
+    }
+    if (result.decision === 'evade_left' || result.decision === 'evade_right' || result.decision === 'hover') stats.evasions++;
+    applyDecision(result);
+    updateBattery(result.decision, DECISION_INTERVAL);
+    prevRoverPos = { x: rover.x, y: rover.y };
+  }
+
+  // Landed (arrived / charging / dead battery) — wind doesn't push it around.
+  function isLanded() { return battery.depleted || battery.charging || current.decision === 'arrived'; }
+
+  // One physics step: wind drift, threat motion, collision resolution, and
+  // a navigation decision every DECISION_INTERVAL of sim time. Shared by the
+  // render loop and the headless stress test (tests/stress.js), so both run
+  // identical logic. Returns true on ticks where a decision was made.
+  let decisionAccum = 0;
+  function simStep(dt) {
+    wind.angle += (Math.random() - 0.5) * 0.6 * wind.gust * dt;
+    wind.speed = clamp(wind.speed + (Math.random() - 0.5) * 0.5 * wind.gust * dt, 0, wind.maxSpeed);
+    if (!isLanded()) {
+      rover.x += Math.cos(wind.angle) * wind.speed * WIND_DRIFT * dt;
+      rover.y += Math.sin(wind.angle) * wind.speed * WIND_DRIFT * dt;
+    }
+    updateThreats(dt);
+    resolveCollisions();
+    decisionAccum += dt;
+    if (decisionAccum >= DECISION_INTERVAL) {
+      decisionAccum -= DECISION_INTERVAL;
+      decisionTick();
+      return true;
+    }
+    return false;
+  }
+
+  // Restarts the current scenario from base with a full battery: a delivery
+  // mission is re-planned with the same stops; a single trip re-flies to
+  // the same destination.
+  function reset() {
+    const replay = mission;
+    rover.x = START.x; rover.y = START.y; rover.heading = 0.35;
+    battery.charge = 100; battery.charging = false; battery.depleted = false; lastRtbCheck = 0;
+    wind.angle = Math.random() * Math.PI * 2; wind.speed = wind.maxSpeed * 0.4;
+    initThreats();
+    prevRoverPos = { x: rover.x, y: rover.y };
+    avoiding = false; avoidDir = null; avoidTicksLeft = 0; consecutiveEvades = 0;
+    simTime = 0; bestDistSeen = Infinity; bestDistAt = 0; decisionAccum = 0; lastLosReplanAt = -Infinity;
+    stats = { collisions: 0, hits: 0, evasions: 0, arrivals: 0, replans: 0 };
+    current = { decision: 'forward', confidence: 0.7 };
+    if (replay.kind === 'delivery') planMission(replay.stops.map(s => ({ x: s.x, y: s.y })), replay.forced);
+    else goTo(replay.legs[replay.legs.length - 1]);
+  }
+
+  function nudgeOutOfObstacles(px, py) {
+    let x = clamp(px, MARGIN + 4, W - MARGIN - 4), y = clamp(py, MARGIN + 4, H - MARGIN - 4);
+    const pad = 20;
+    for (const o of obstacles) {
+      const rx0 = o.x - pad, ry0 = o.y - pad, rx1 = o.x + o.w + pad, ry1 = o.y + o.h + pad;
+      if (x > rx0 && x < rx1 && y > ry0 && y < ry1) {
+        const dLeft = x - rx0, dRight = rx1 - x, dTop = y - ry0, dBottom = ry1 - y;
+        const minD = Math.min(dLeft, dRight, dTop, dBottom);
+        if (minD === dLeft) x = rx0; else if (minD === dRight) x = rx1; else if (minD === dTop) y = ry0; else y = ry1;
+      }
+    }
+    return { x: clamp(x, MARGIN + 4, W - MARGIN - 4), y: clamp(y, MARGIN + 4, H - MARGIN - 4) };
+  }
+  function randomFreePoint() {
+    let px, py, tries = 0;
+    do { px = MARGIN + 30 + Math.random() * (W - MARGIN * 2 - 60); py = MARGIN + 30 + Math.random() * (H - MARGIN * 2 - 60); tries++; }
+    while (tries < 30 && obstacles.some(o => px > o.x - 20 && px < o.x + o.w + 20 && py > o.y - 20 && py < o.y + o.h + 20));
+    return { x: px, y: py };
+  }
+  function pickRandomDestination() { goTo(randomFreePoint()); }
+
+  // =====================================================================
+  // BATTERY + MISSIONS
+  // Every flight is a mission: an ordered list of legs. A plain "fly here"
+  // is a one-leg mission; a delivery run visits several stops in an
+  // optimized order and returns to base. The base pad (START) recharges.
+  // =====================================================================
+
+  // Drain rates in %/s. A full charge is ~90s of cruise: a typical 4-stop
+  // run fits in one charge; 6-7 widely spread stops still need a recharge.
+  // (It was ~45s — tuned for showing off recharging, but it made most
+  // delivery runs fly home mid-mission, which was most of their extra time.)
+  const BATTERY = { FLY: 1.1, EVADE: 1.4, HOVER: 0.75, CHARGE_RATE: 25, RESERVE: 10 };
+  const ENERGY_MARGIN = 1.3;   // planning allowance for evasion, wind and replans
+  const RTB_CHECK_INTERVAL = 1.0, RTB_MARGIN = 1.25; // extra headroom on the failsafe itself — the trip home can hit a threat-heavy chokepoint too
+  const battery = { charge: 100, charging: false, depleted: false };
+  const BASE = { x: START.x, y: START.y };
+
+  function energyFor(len) { return (len / ROVER_SPEED) * BATTERY.FLY * ENERGY_MARGIN; }
+  function pathLength(p) { let L = 0; for (let i = 1; i < p.length; i++) L += Math.hypot(p[i].x - p[i-1].x, p[i].y - p[i-1].y); return L; }
+  function routeLength(a, b) {
+    const raw = astar(a.x, a.y, b.x, b.y);
+    return raw ? pathLength([a, ...smoothPath(raw), b]) : Infinity;
+  }
+
+  let mission = { kind: 'single', legs: [{ x: destination.x, y: destination.y, kind: 'dest' }], idx: 0 };
+  let missionComplete = false;
+  let lastRtbCheck = 0, lastArrivedLeg = null;
+
+  function currentLeg() { return mission.legs[mission.idx]; }
+
+  function goTo(d) {
+    mission = { kind: 'single', legs: [{ x: d.x, y: d.y, kind: 'dest' }], idx: 0 };
+    missionComplete = false;
+    setDestination(d);
+  }
+
+  // Fly an ordering on paper: walk the stops with a simulated battery,
+  // detouring to base before any stop we couldn't reach AND still get home
+  // from with RESERVE left. Returns the legs plus an estimated mission time
+  // (flight + charging) — the quantity the order is actually optimized for.
+  function walkTour(order, dist, startCharge) {
+    const legs = [];
+    let charge = startCharge, at = 0, length = 0, chargeTime = 0, recharges = 0;
+    for (const k of order) {
+      const need = energyFor(dist[at][k]) + energyFor(dist[k][0]) + BATTERY.RESERVE;
+      if (charge < need && charge < 99.9) {
+        length += dist[at][0];
+        chargeTime += (100 - Math.max(0, charge - energyFor(dist[at][0]))) / BATTERY.CHARGE_RATE;
+        legs.push({ ...BASE, kind: 'base' }); recharges++;
+        charge = 100; at = 0;
+      }
+      charge -= energyFor(dist[at][k]);
+      length += dist[at][k];
+      legs.push({ x: 0, y: 0, kind: 'stop', stop: k });
+      at = k;
+    }
+    length += dist[at][0];
+    legs.push({ ...BASE, kind: 'base', final: true });
+    return { legs, length, recharges, time: length / ROVER_SPEED + chargeTime };
+  }
+
+  // Best visiting order (indices into pts, 0 = base) by estimated mission
+  // TIME including recharge detours — not bare distance, which picks
+  // orders that look short but need an extra trip home. Exact by brute
+  // force up to 7 stops (5040 walks over a precomputed distance matrix,
+  // a few ms); nearest-neighbour + 2-opt on the same cost beyond that.
+  function bestOrder(dist, n, startCharge) {
+    const ids = Array.from({ length: n }, (_, i) => i + 1);
+    const cost = (ord) => walkTour(ord, dist, startCharge).time;
+    if (n <= 7) {
+      let best = null, bestT = Infinity;
+      (function permute(arr, k) {
+        if (k === arr.length) { const T = cost(arr); if (T < bestT) { bestT = T; best = arr.slice(); } return; }
+        for (let i = k; i < arr.length; i++) { [arr[k], arr[i]] = [arr[i], arr[k]]; permute(arr, k + 1); [arr[k], arr[i]] = [arr[i], arr[k]]; }
+      })(ids, 0);
+      return { order: best, method: 'exact' };
+    }
+    const left = new Set(ids), ord = []; let at = 0;
+    while (left.size) { let nx = null; for (const j of left) if (nx === null || dist[at][j] < dist[at][nx]) nx = j; ord.push(nx); left.delete(nx); at = nx; }
+    let improved = true;
+    while (improved) {
+      improved = false;
+      for (let i = 0; i < ord.length - 1; i++) for (let j = i + 1; j < ord.length; j++) {
+        const cand = ord.slice(0, i).concat(ord.slice(i, j + 1).reverse(), ord.slice(j + 1));
+        if (cost(cand) < cost(ord) - 1e-6) { ord.splice(0, ord.length, ...cand); improved = true; }
+      }
+    }
+    return { order: ord, method: 'nearest-neighbour + 2-opt' };
+  }
+
+  function distanceMatrix(pts) {
+    const n = pts.length;
+    const dist = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) dist[i][j] = dist[j][i] = routeLength(pts[i], pts[j]);
+    return dist;
+  }
+
+  // forced: optional visiting order (1-based stop indices), e.g. the one
+  // Grover's search picked offline — flown as given instead of re-optimized.
+  function planMission(stops, forced) {
+    const pts = [BASE, ...stops];
+    const dist = distanceMatrix(pts);
+    const { order, method } = forced ? { order: forced.order, method: forced.method } : bestOrder(dist, stops.length, battery.charge);
+    const walk = walkTour(order, dist, battery.charge);
+    const legs = walk.legs.map(l => l.kind === 'stop' ? { ...l, x: pts[l.stop].x, y: pts[l.stop].y } : l);
+
+    const visitNo = new Map(order.map((k, i) => [k, i + 1]));  // label stops in the order they'll be flown
+    mission = { kind: 'delivery', stops: stops.map((s, i) => ({ x: s.x, y: s.y, n: visitNo.get(i + 1), delivered: false })),
+                legs, idx: 0, order: order.slice(), plannedLength: walk.length, plannedTime: walk.time, method,
+                plannedRecharges: walk.recharges, rtbs: 0, forced: forced || null };
+    missionComplete = false;
+    setDestination(legs[0]);
+    return mission;
+  }
+
+  function advanceLeg() {
+    mission.idx++;
+    if (mission.idx >= mission.legs.length) { missionComplete = true; return; }
+    setDestination(currentLeg());
+  }
+
+  function onArrive() {
+    const leg = currentLeg();
+    if (!leg) return;
+    if (leg.kind === 'stop') mission.stops[leg.stop - 1].delivered = true;
+    if (leg.kind === 'base') battery.charging = true;           // advance once full
+    if (leg.kind !== 'base' || leg.final) advanceLeg();
+  }
+
+  // Live failsafe: planning uses estimates, and evasion/wind can burn more
+  // than expected. If the charge left can't cover the real (A*) route home
+  // plus the full reserve, divert to base now and resume after charging.
+  // (A straight-line × 1.35 estimate with half the reserve was tried first
+  // and let a drone die 1% short of the pad after a threat-heavy chokepoint.)
+  function checkReturnToBase() {
+    if (simTime - lastRtbCheck < RTB_CHECK_INTERVAL) return;
+    lastRtbCheck = simTime;
+    const leg = currentLeg();
+    if (!leg || leg.kind === 'base' || battery.charging) return;
+    const homeNeed = energyFor(routeLength(rover, BASE)) * RTB_MARGIN + BATTERY.RESERVE;
+    if (battery.charge < homeNeed) {
+      mission.legs.splice(mission.idx, 0, { ...BASE, kind: 'base', rtb: true });
+      mission.rtbs = (mission.rtbs || 0) + 1;
+      setDestination(currentLeg());
+    }
+  }
+
+  function updateBattery(decision, dt) {
+    if (battery.charging) {
+      battery.charge = Math.min(100, battery.charge + BATTERY.CHARGE_RATE * dt);
+      if (battery.charge >= 100) { battery.charging = false; if (!missionComplete) advanceLeg(); }
+      return;
+    }
+    if (decision === 'arrived') return;                         // landed
+    const rate = decision === 'hover' ? BATTERY.HOVER
+      : (decision === 'evade_left' || decision === 'evade_right') ? BATTERY.EVADE : BATTERY.FLY;
+    battery.charge = Math.max(0, battery.charge - rate * dt);
+    if (battery.charge <= 0) battery.depleted = true;
+  }
+
+  // @@END_NAV_CORE@@ — tests/stress.js extracts everything above this line.
+
+  // =====================================================================
+  // 3D RENDERING (Three.js)
+  // =====================================================================
+
+  const container = document.getElementById('scene-container');
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0b0e0a);
+  scene.fog = new THREE.Fog(0x0b0e0a, 500, 1400);
+
+  const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 1, 3000);
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  container.appendChild(renderer.domElement);
+
+  scene.add(new THREE.AmbientLight(0x8899aa, 0.7));
+  const sun = new THREE.DirectionalLight(0xfff2d8, 0.9);
+  sun.position.set(300, 500, 200);
+  scene.add(sun);
+
+  const ARENA_CX = W / 2, ARENA_CZ = H / 2;
+
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x11150f, roughness: 1 });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(W, H), groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.set(ARENA_CX, 0, ARENA_CZ);
+  scene.add(ground);
+
+  const grid = new THREE.GridHelper(Math.max(W, H), 38, 0x2a3a2c, 0x1c261d);
+  grid.position.set(ARENA_CX, 0.15, ARENA_CZ);
+  scene.add(grid);
+
+  // boundary walls (thin, low, just for visual framing)
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x2b332c, roughness: 0.9 });
+  function addBoundaryWall(x, z, w, d) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, 10, d), wallMat);
+    m.position.set(x, 5, z);
+    scene.add(m);
+  }
+  addBoundaryWall(ARENA_CX, MARGIN, W, 3);
+  addBoundaryWall(ARENA_CX, H - MARGIN, W, 3);
+  addBoundaryWall(MARGIN, ARENA_CZ, 3, H);
+  addBoundaryWall(W - MARGIN, ARENA_CZ, 3, H);
+
+  const obstacleMat = new THREE.MeshStandardMaterial({ color: 0x28312a, roughness: 0.85 });
+  const OBSTACLE_HEIGHT = 46;
+  for (const o of obstacles) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(o.w, OBSTACLE_HEIGHT, o.h), obstacleMat);
+    m.position.set(o.x + o.w / 2, OBSTACLE_HEIGHT / 2, o.y + o.h / 2);
+    scene.add(m);
+  }
+
+  // base / charging pad at START
+  const basePad = new THREE.Mesh(new THREE.CylinderGeometry(15, 15, 1.2, 32), new THREE.MeshStandardMaterial({ color: 0x2c3e4a, emissive: 0x0f1a22 }));
+  basePad.position.set(BASE.x, 0.6, BASE.y);
+  scene.add(basePad);
+  const baseRing = new THREE.Mesh(new THREE.TorusGeometry(15, 1, 8, 36), new THREE.MeshStandardMaterial({ color: 0x7c9cb3, emissive: 0x2a3a44 }));
+  baseRing.rotation.x = Math.PI / 2;
+  baseRing.position.set(BASE.x, 1.3, BASE.y);
+  scene.add(baseRing);
+
+  // delivery stops: a pillar + ground ring each; amber = pending, green = delivered,
+  // grey = queued in click-to-add mode but not launched yet
+  const stopMats = {
+    pending: new THREE.MeshStandardMaterial({ color: 0xe0a458, emissive: 0x3a2810 }),
+    done: new THREE.MeshStandardMaterial({ color: 0x7fbf8a, emissive: 0x1a3a20 }),
+    queued: new THREE.MeshStandardMaterial({ color: 0x8fa089, emissive: 0x151a14, transparent: true, opacity: 0.6 })
+  };
+  const stopGroup = new THREE.Group();
+  scene.add(stopGroup);
+  const MAX_STOPS = 7;                  // exact order search stays instant up to 7
+  let pendingStops = [], stopMode = false, missionDirty = true;
+  let missionLine = null;
+  function rebuildStopMarkers() {
+    while (stopGroup.children.length) { const c = stopGroup.children.pop(); c.geometry.dispose(); }
+    const items = mission.kind === 'delivery'
+      ? mission.stops.map(s => ({ ...s, mat: s.delivered ? stopMats.done : stopMats.pending }))
+      : [];
+    for (const q of pendingStops) items.push({ ...q, mat: stopMats.queued });
+    for (const s of items) {
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 34, 8), s.mat);
+      pillar.position.set(s.x, 17, s.y);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(8, 1.2, 6, 24), s.mat);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(s.x, 1, s.y);
+      stopGroup.add(pillar, ring);
+    }
+    // dashed visit-order line through the remaining legs (straight segments —
+    // an ordering hint, not the flown path, which is the solid line)
+    if (missionLine) { scene.remove(missionLine); missionLine.geometry.dispose(); missionLine = null; }
+    if (mission.kind === 'delivery' && !missionComplete) {
+      const pts = [{ x: rover.x, y: rover.y }, ...mission.legs.slice(mission.idx)].map(p => new THREE.Vector3(p.x, 1.5, p.y));
+      missionLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineDashedMaterial({ color: 0xe0a458, dashSize: 6, gapSize: 5, transparent: true, opacity: 0.55 }));
+      missionLine.computeLineDistances();
+      scene.add(missionLine);
+    }
+  }
+
+  // destination marker (pulsing ring)
+  const destMarker = new THREE.Mesh(new THREE.TorusGeometry(11, 1.6, 8, 28), new THREE.MeshStandardMaterial({ color: 0xd9c77a, emissive: 0x3a3216 }));
+  destMarker.rotation.x = Math.PI / 2;
+  scene.add(destMarker);
+
+  // path line
+  let pathLine = null;
+  function rebuildPathLine() {
+    if (pathLine) { scene.remove(pathLine); pathLine.geometry.dispose(); }
+    const points = [{ x: rover.x, y: rover.y }, ...path].map(p => new THREE.Vector3(p.x, 2.5, p.y));
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({ color: 0x7c9cb3, transparent: true, opacity: 0.8 });
+    pathLine = new THREE.Line(geo, mat);
+    scene.add(pathLine);
+  }
+  rebuildPathLine();
+
+  // drone
+  const droneGroup = new THREE.Group();
+  const droneBodyMat = new THREE.MeshStandardMaterial({ color: 0x7fbf8a, emissive: 0x1a3a20 });
+  const droneBody = new THREE.Mesh(new THREE.ConeGeometry(4.5, 11, 4), droneBodyMat);
+  droneBody.rotation.x = Math.PI / 2;
+  droneGroup.add(droneBody);
+  const armMat = new THREE.MeshStandardMaterial({ color: 0x3a463c });
+  const armOffsets = [[1,1],[1,-1],[-1,1],[-1,-1]];
+  const rotors = [];
+  for (const [ax, az] of armOffsets) {
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 9, 6), armMat);
+    arm.rotation.z = Math.PI / 2;
+    arm.position.set(ax * 4.5, 0, az * 4.5);
+    droneGroup.add(arm);
+    const rotor = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 0.4, 10), new THREE.MeshStandardMaterial({ color: 0x1a201a, transparent: true, opacity: 0.7 }));
+    rotor.position.set(ax * 8, 0.6, az * 8);
+    droneGroup.add(rotor);
+    rotors.push(rotor);
+  }
+  scene.add(droneGroup);
+  const DRONE_ALT = 16;
+
+  // threats
+  const birdMat = new THREE.MeshStandardMaterial({ color: 0xd9c77a, emissive: 0x2a2412 });
+  const rogueMat = new THREE.MeshStandardMaterial({ color: 0x9aa7ae, emissive: 0x1a1e20 });
+  const vanMat = new THREE.MeshStandardMaterial({ color: 0xc4593f, emissive: 0x2a1510 });
+  const threatMeshes = new Map();
+  function ensureThreatMeshes() {
+    for (const m of threatMeshes.values()) scene.remove(m);
+    threatMeshes.clear();
+    for (const t of threats) {
+      let mesh;
+      if (t.kind === 'bird') mesh = new THREE.Mesh(new THREE.ConeGeometry(2.6, 7, 4), birdMat);
+      else if (t.kind === 'van') mesh = new THREE.Mesh(new THREE.BoxGeometry(15, 8, 9), vanMat);
+      else mesh = new THREE.Mesh(new THREE.BoxGeometry(9, 5, 6), rogueMat);
+      scene.add(mesh);
+      threatMeshes.set(t, mesh);
+    }
+  }
+  ensureThreatMeshes();
+
+  // wind arrows (small ground-level indicators)
+  const windGroup = new THREE.Group();
+  scene.add(windGroup);
+  const windArrows = [];
+  for (let gx = 60; gx < W; gx += 130) {
+    for (let gz = 60; gz < H; gz += 110) {
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(2, 8, 6), new THREE.MeshStandardMaterial({ color: 0x7c9cb3, transparent: true, opacity: 0.4 }));
+      arrow.rotation.x = Math.PI / 2;
+      arrow.position.set(gx, 3, gz);
+      windGroup.add(arrow);
+      windArrows.push(arrow);
+    }
+  }
+
+  // manual orbit camera
+  const camTarget = new THREE.Vector3(ARENA_CX, 10, ARENA_CZ);
+  let camAzimuth = 0.85, camElevation = 0.65, camRadius = 620;
+  let dragging = false, lastPX = 0, lastPY = 0;
+
+  function updateCamera() {
+    camera.position.set(
+      camTarget.x + camRadius * Math.cos(camElevation) * Math.sin(camAzimuth),
+      camTarget.y + camRadius * Math.sin(camElevation),
+      camTarget.z + camRadius * Math.cos(camElevation) * Math.cos(camAzimuth)
+    );
+    camera.lookAt(camTarget);
+  }
+  updateCamera();
+
+  function onDragStart(x, y) { dragging = true; lastPX = x; lastPY = y; }
+  function onDragMove(x, y) {
+    if (!dragging) return;
+    const dx = x - lastPX, dy = y - lastPY;
+    camAzimuth -= dx * 0.006;
+    camElevation = clamp(camElevation - dy * 0.006, 0.12, 1.45);
+    lastPX = x; lastPY = y;
+  }
+  function onDragEnd() { dragging = false; }
+
+  renderer.domElement.addEventListener('pointerdown', (e) => onDragStart(e.clientX, e.clientY));
+  window.addEventListener('pointermove', (e) => onDragMove(e.clientX, e.clientY));
+  window.addEventListener('pointerup', onDragEnd);
+  renderer.domElement.addEventListener('wheel', (e) => { e.preventDefault(); camRadius = clamp(camRadius + e.deltaY * 0.6, 150, 1400); }, { passive: false });
+
+  // click-to-set-destination via raycasting onto the ground plane
+  const raycaster = new THREE.Raycaster();
+  const pointerNdc = new THREE.Vector2();
+  let pointerDownPos = null;
+  renderer.domElement.addEventListener('pointerdown', (e) => { pointerDownPos = { x: e.clientX, y: e.clientY }; });
+  renderer.domElement.addEventListener('pointerup', (e) => {
+    if (!pointerDownPos) return;
+    const moved = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+    pointerDownPos = null;
+    if (moved > 6) return; // treat as a drag, not a click
+    pointerNdc.x = (e.clientX / window.innerWidth) * 2 - 1;
+    pointerNdc.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(pointerNdc, camera);
+    const hit = raycaster.intersectObject(ground)[0];
+    if (hit) {
+      const nudged = nudgeOutOfObstacles(hit.point.x, hit.point.z);
+      if (stopMode) {
+        if (pendingStops.length < MAX_STOPS) pendingStops.push(nudged);
+      } else {
+        goTo(nudged);
+        rebuildPathLine();
+      }
+      missionDirty = true;
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // =====================================================================
+  // UI + main loop
+  // =====================================================================
+  const el = {
+    decisionVal: document.getElementById('decisionVal'),
+    confFill: document.getElementById('confFill'),
+    confLabel: document.getElementById('confLabel'),
+    routeLine: document.getElementById('routeLine'),
+    windLine: document.getElementById('windLine'),
+    statTime: document.getElementById('statTime'),
+    statCollisions: document.getElementById('statCollisions'),
+    statEvasions: document.getElementById('statEvasions'),
+    statHits: document.getElementById('statHits'),
+    statArrivals: document.getElementById('statArrivals'),
+    statReplans: document.getElementById('statReplans'),
+    statusDot: document.getElementById('statusDot'),
+    statusText: document.getElementById('statusText'),
+    threatsToggle: document.getElementById('threatsToggle'),
+    quantumToggle: document.getElementById('quantumToggle'),
+    btnPlayPause: document.getElementById('btnPlayPause'),
+    btnReset: document.getElementById('btnReset'),
+    btnNewDest: document.getElementById('btnNewDest'),
+    btnFlyQuantum: document.getElementById('btnFlyQuantum'),
+    quantumCandidates: document.getElementById('quantumCandidates'),
+    quantumResultLine: document.getElementById('quantumResultLine'),
+    battFill: document.getElementById('battFill'),
+    battLine: document.getElementById('battLine'),
+    missionLine: document.getElementById('missionLine'),
+    missionStops: document.getElementById('missionStops'),
+    btnRandomMission: document.getElementById('btnRandomMission'),
+    stopModeToggle: document.getElementById('stopModeToggle'),
+    pendingRow: document.getElementById('pendingRow'),
+    btnLaunch: document.getElementById('btnLaunch'),
+    btnClearStops: document.getElementById('btnClearStops'),
+    canvasHint: document.getElementById('canvasHint'),
+    btnSpeed: document.getElementById('btnSpeed'),
+    groverIntro: document.getElementById('groverIntro'),
+    groverSteps: document.getElementById('groverSteps'),
+    groverResultLine: document.getElementById('groverResultLine'),
+    btnFlyGrover: document.getElementById('btnFlyGrover')
+  };
+
+  const SPEEDS = [1, 2, 4];
+  let simSpeed = 1;
+  el.btnSpeed.addEventListener('click', () => {
+    simSpeed = SPEEDS[(SPEEDS.indexOf(simSpeed) + 1) % SPEEDS.length];
+    el.btnSpeed.textContent = simSpeed + '×';
+  });
+
+  function ensureRunning() {
+    if (!running) { running = true; el.btnPlayPause.textContent = 'Pause'; el.statusText.textContent = 'running'; el.statusDot.classList.remove('paused'); }
+  }
+  function launchMission(stops, forced) {
+    reset();                       // back to base, full battery, fresh threats
+    planMission(stops, forced);
+    pendingStops = [];
+    rebuildPathLine(); ensureThreatMeshes();
+    missionDirty = true; ensureRunning(); updateHUD();
+  }
+  el.btnRandomMission.addEventListener('click', () => {
+    const stops = [];
+    for (let i = 0; i < 4; i++) stops.push(randomFreePoint());
+    launchMission(stops);
+  });
+  el.stopModeToggle.addEventListener('change', () => {
+    stopMode = el.stopModeToggle.checked;
+    if (!stopMode) pendingStops = [];
+    missionDirty = true; updateHUD();
+  });
+  el.btnLaunch.addEventListener('click', () => {
+    if (!pendingStops.length) return;
+    const stops = pendingStops.slice();
+    stopMode = false; el.stopModeToggle.checked = false;
+    launchMission(stops);
+  });
+  el.btnClearStops.addEventListener('click', () => { pendingStops = []; missionDirty = true; updateHUD(); });
+
+  el.btnPlayPause.addEventListener('click', () => {
+    running = !running;
+    el.btnPlayPause.textContent = running ? 'Pause' : 'Resume';
+    el.statusText.textContent = running ? 'running' : 'paused';
+    el.statusDot.classList.toggle('paused', !running);
+  });
+  el.btnReset.addEventListener('click', () => { reset(); rebuildPathLine(); ensureThreatMeshes(); missionDirty = true; updateHUD(); });
+  el.btnNewDest.addEventListener('click', () => { pickRandomDestination(); rebuildPathLine(); missionDirty = true; updateHUD(); });
+
+  el.btnFlyQuantum.addEventListener('click', () => {
+    const qp = QUANTUM_RESULT.winningPath;
+    mission = { kind: 'single', legs: [{ x: qp[qp.length - 1].x, y: qp[qp.length - 1].y, kind: 'dest' }], idx: 0 };
+    reset();                       // replays the single trip we just set up
+    path = qp.map(p => ({ ...p }));
+    pathImprovedPct = 0;
+    wpIdx = 0;
+    rebuildPathLine();
+    ensureThreatMeshes();
+    missionDirty = true;
+    ensureRunning();
+  });
+
+  el.btnFlyGrover.addEventListener('click', () => {
+    stopMode = false; el.stopModeToggle.checked = false; pendingStops = [];
+    launchMission(GROVER_DELIVERY.stops.map(p => ({ ...p })),
+                  { order: GROVER_DELIVERY.order.slice(), method: "Grover's search (Qiskit)" });
+  });
+
+  (function renderGroverPanel() {
+    const G = GROVER_DELIVERY;
+    el.groverIntro.textContent = `A fixed ${G.stops.length}-stop mission has ${G.numOrders} possible visiting orders, encoded in ${G.qubits} qubits. ` +
+      `Grover's search repeatedly looked for "an order faster than the best so far" until nothing faster turned up.`;
+    const span = G.worstS - G.classicalBestS;
+    el.groverSteps.innerHTML = G.thresholds.map((t, i) => {
+      const last = i === G.thresholds.length - 1;
+      const w = Math.max(4, ((t - G.classicalBestS) / span) * 100 * 0.9 + 10).toFixed(0);
+      const color = last ? 'var(--gold)' : 'var(--dust)';
+      return `<div style="display:flex; align-items:center; gap:6px;">
+        <span style="width:44px; color:${last ? 'var(--gold)' : 'var(--muted)'};">${i === 0 ? 'start' : 'step ' + i}</span>
+        <div style="flex:1; height:10px; background:var(--panel-2); border-radius:3px; overflow:hidden;">
+          <div style="width:${w}%; height:100%; background:${color};"></div>
+        </div>
+        <span style="width:40px; text-align:right; color:${last ? 'var(--gold)' : 'var(--muted)'};">${t.toFixed(1)}s</span>
+      </div>`;
+    }).join('');
+    const pct = (G.showcase.hits / G.showcase.shots * 100).toFixed(1);
+    el.groverResultLine.textContent = `Found the exact optimum (${G.timeS.toFixed(1)}s vs ${G.worstS.toFixed(0)}s worst), matching the classical planner. ` +
+      `${G.oracleCalls} oracle calls, ${G.measurements} measurements. A single ${G.showcase.iterations}-iteration search lands on the best order in ${pct}% of shots vs ${G.showcase.uniformPct}% by chance. ` +
+      `Not faster than classical here: the oracle was built from all ${G.numOrders} classically computed costs.`;
+  })();
+
+  (function renderQuantumPanel() {
+    const maxLen = Math.max(...QUANTUM_RESULT.candidates.map(c => c.length));
+    el.quantumCandidates.innerHTML = QUANTUM_RESULT.candidates.map((c, i) => {
+      const isWinner = i === QUANTUM_RESULT.winnerIdx;
+      const barWidth = (c.length / maxLen * 100).toFixed(0);
+      const color = isWinner ? 'var(--gold)' : 'var(--line)';
+      return `<div style="display:flex; align-items:center; gap:6px;">
+        <span style="width:14px; color:${isWinner ? 'var(--gold)' : 'var(--muted)'};">${isWinner ? '\u2605' : i}</span>
+        <div style="flex:1; height:10px; background:var(--panel-2); border-radius:3px; overflow:hidden;">
+          <div style="width:${barWidth}%; height:100%; background:${color};"></div>
+        </div>
+        <span style="color:${isWinner ? 'var(--gold)' : 'var(--muted)'};">${c.length.toFixed(0)}px</span>
+      </div>`;
+    }).join('');
+    el.quantumResultLine.textContent = `Grover's search: ${QUANTUM_RESULT.winnerShots}/${QUANTUM_RESULT.shots} shots \u2192 candidate ${QUANTUM_RESULT.winnerIdx} (100%)`;
+  })();
+  el.threatsToggle.addEventListener('change', () => { threatsEnabled = el.threatsToggle.checked; });
+  el.quantumToggle.addEventListener('change', () => { useQuantum = el.quantumToggle.checked; replan(); rebuildPathLine(); });
+
+  function updateHUD() {
+    el.decisionVal.textContent = current.decision.replace('_', ' ');
+    el.decisionVal.className = 'decision-value ' + current.decision;
+    el.confFill.style.width = Math.round((current.confidence || 0) * 100) + '%';
+    el.confLabel.textContent = 'confidence ' + (current.confidence || 0).toFixed(2);
+    const remain = path.length - wpIdx;
+    el.routeLine.textContent = `${remain} waypoint${remain === 1 ? '' : 's'} left` + (pathImprovedPct > 0.1 ? ` · refined ${pathImprovedPct.toFixed(1)}% shorter` : '');
+    el.windLine.textContent = `${Math.round((wind.angle * 180 / Math.PI + 360) % 360)}°, ${wind.speed.toFixed(2)} speed`;
+    el.statTime.textContent = simTime.toFixed(1) + 's';
+    el.statCollisions.textContent = stats.collisions;
+    el.statEvasions.textContent = stats.evasions;
+    el.statHits.textContent = stats.hits;
+    el.statArrivals.textContent = stats.arrivals;
+    el.statReplans.textContent = stats.replans;
+
+    const pct = battery.charge;
+    el.battFill.style.width = pct.toFixed(1) + '%';
+    el.battFill.className = 'batt-fill' + (pct < 15 ? ' critical' : pct < 35 ? ' low' : '');
+    const leg = currentLeg();
+    const battState = battery.depleted ? 'depleted — landed where it was. Reset to recover.'
+      : battery.charging ? 'charging on the base pad'
+      : (leg && leg.rtb) ? 'low — returning to base to recharge'
+      : current.decision === 'arrived' ? 'landed' : 'flying';
+    el.battLine.textContent = `${pct.toFixed(0)}% · ${battState}`;
+    if (battery.depleted) { el.statusText.textContent = 'battery depleted'; el.statusDot.classList.add('paused'); }
+
+    if (missionDirty) renderMissionPanel();
+  }
+
+  function renderMissionPanel() {
+    missionDirty = false;
+    rebuildStopMarkers();
+    el.pendingRow.style.display = stopMode ? 'flex' : 'none';
+    el.btnLaunch.textContent = pendingStops.length ? `Launch ${pendingStops.length}-stop run` : 'Click the ground to add stops';
+    el.btnLaunch.disabled = !pendingStops.length;
+    el.canvasHint.textContent = stopMode
+      ? `Click the ground to add delivery stops (${pendingStops.length}/${MAX_STOPS}) · drag to orbit`
+      : 'Drag to orbit · scroll to zoom · click ground to set a new destination';
+    if (mission.kind !== 'delivery') {
+      el.missionLine.textContent = 'Single trip — click the ground to fly somewhere, or plan a delivery run.';
+      el.missionStops.innerHTML = '';
+      return;
+    }
+    const done = mission.stops.filter(s => s.delivered).length;
+    const extra = [];
+    if (mission.plannedRecharges) extra.push(`${mission.plannedRecharges} planned recharge${mission.plannedRecharges > 1 ? 's' : ''}`);
+    if (mission.rtbs) extra.push(`${mission.rtbs} low-battery return${mission.rtbs > 1 ? 's' : ''}`);
+    el.missionLine.textContent = (missionComplete ? `Complete — ${done}/${mission.stops.length} delivered, back at base.` : `${done}/${mission.stops.length} delivered.`)
+      + ` Est. ${mission.plannedTime.toFixed(0)}s (${mission.plannedLength.toFixed(0)}px), order: ${mission.method}` + (extra.length ? ` · ${extra.join(', ')}` : '') + '.';
+    el.missionStops.innerHTML = mission.legs.map((l, i) => {
+      const isNow = i === mission.idx && !missionComplete;
+      if (l.kind === 'base') {
+        const label = l.final ? 'Return to base' : l.rtb ? 'Base — low-battery recharge' : 'Base — planned recharge';
+        const cls = 'base' + (i < mission.idx || missionComplete ? ' done' : '') + (isNow ? ' now' : '');
+        return `<li class="${cls}"><span class="chip"></span>${isNow ? '\u25B8 ' : ''}${label}</li>`;
+      }
+      const st = mission.stops[l.stop - 1];
+      const cls = (st.delivered ? 'done' : '') + (isNow ? ' now' : '');
+      return `<li class="${cls}"><span class="chip"></span>${isNow ? '\u25B8 ' : ''}Stop ${st.n} (${st.x.toFixed(0)}, ${st.y.toFixed(0)})${st.delivered ? ' \u2713' : ''}</li>`;
+    }).join('');
+  }
+
+  let lastFrame = performance.now();
+  let lastPathVersion = path;
+  let lastMissionSig = '';
+  let droneAlt = DRONE_ALT;
+
+  function frame(now) {
+    const dtSec = Math.min(0.25, (now - lastFrame) / 1000);
+    lastFrame = now;
+
+    // Fixed 1/60s physics substeps (same step the stress test uses), so a
+    // slow device or throttled tab still runs the sim at real-time speed
+    // instead of in slow motion.
+    let decided = false;
+    if (running) {
+      const simDt = dtSec * simSpeed;
+      const steps = Math.max(1, Math.round(simDt * 60));
+      for (let i = 0; i < steps; i++) decided = simStep(simDt / steps) || decided;
+    }
+    if (decided) {
+      if (path !== lastPathVersion) { rebuildPathLine(); lastPathVersion = path; }
+      const sig = mission.idx + '|' + mission.legs.length + '|' + missionComplete;
+      if (sig !== lastMissionSig) { lastMissionSig = sig; missionDirty = true; }
+      updateHUD();
+    }
+
+    // sync 3D scene to sim state — descend onto the ground/pad when landed
+    const targetAlt = isLanded() ? 3 : DRONE_ALT;
+    droneAlt += (targetAlt - droneAlt) * Math.min(1, dtSec * 3);
+    const bob = isLanded() ? 0 : Math.sin(simTime * 3) * 1.2;
+    droneGroup.position.set(rover.x, droneAlt + bob, rover.y);
+    droneGroup.rotation.y = -rover.heading;
+    if (!battery.depleted) for (const r of rotors) r.rotation.y += dtSec * (isLanded() ? 8 : 40);
+
+    destMarker.position.set(destination.x, 2 + Math.sin(now * 0.003) * 1, destination.y);
+
+    if (threatMeshes.size !== threats.length) ensureThreatMeshes();
+    for (const t of threats) {
+      const mesh = threatMeshes.get(t);
+      if (!mesh) continue;
+      const alt = t.kind === 'bird' ? DRONE_ALT + 4 : 4;
+      mesh.position.set(t.x, alt, t.y);
+      mesh.rotation.y = -Math.atan2(t.vy, t.vx);
+    }
+
+    for (const arrow of windArrows) arrow.rotation.y = -wind.angle;
+
+    updateCamera();
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+
+  updateHUD();
+  requestAnimationFrame((t) => { lastFrame = t; frame(t); });
+})();
+</script>
+</body>
+</html>

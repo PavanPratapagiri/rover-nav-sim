@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rover Sim — decision loop, wind, threats & waypoint travel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #131612;
+    --panel: #1B211C;
+    --panel-2: #1F2620;
+    --line: #2B332C;
+    --text: #E7EAE4;
+    --muted: #8FA089;
+    --moss: #7FBF8A;
+    --moss-dim: #4C6E52;
+    --amber: #E0A458;
+    --amber-dim: #7A6440;
+    --rust: #C4593F;
+    --alert: #E8735A;
+    --dust: #7C9CB3;
+    --dust-dim: #48606E;
+    --gold: #D9C77A;
+    --steel: #9AA7AE;
+    --font-ui: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    box-sizing: border-box;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #131612; --panel: #1B211C; --panel-2: #1F2620; --line: #2B332C; --text: #E7EAE4; --muted: #8FA089;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  body {
+    padding: 28px 20px 40px;
+    display: flex;
+    justify-content: center;
+  }
+  .wrap {
+    width: 100%;
+    max-width: 1080px;
+  }
+  header {
+    margin-bottom: 20px;
+  }
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--dust);
+    letter-spacing: 0.02em;
+    margin: 0 0 8px;
+  }
+  h1 {
+    font-size: 26px;
+    line-height: 1.25;
+    font-weight: 600;
+    margin: 0 0 8px;
+    max-width: 640px;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 14.5px;
+    line-height: 1.6;
+    max-width: 620px;
+    margin: 0;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
+    gap: 18px;
+    margin-top: 22px;
+    align-items: start;
+  }
+  @media (max-width: 820px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+  .stage {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .stage-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .status-pill {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 4px 9px;
+    border-radius: 5px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--moss);
+  }
+  .dot.paused { background: var(--muted); }
+  canvas {
+    width: 100%;
+    display: block;
+    background: #0F1310;
+    border-radius: 7px;
+    border: 1px solid var(--line);
+    cursor: crosshair;
+  }
+  .canvas-hint {
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 7px;
+  }
+  .controls-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  button {
+    font-family: var(--font-ui);
+    font-size: 13.5px;
+    font-weight: 500;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: var(--panel-2);
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  button:hover { border-color: var(--moss-dim); }
+  button:focus-visible { outline: 2px solid var(--moss); outline-offset: 1px; }
+  button.primary {
+    background: var(--moss);
+    border-color: var(--moss);
+    color: #0F1310;
+  }
+  button.primary:hover { border-color: var(--moss); }
+  .mini-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12.5px;
+    color: var(--muted);
+    margin-left: auto;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .block-title {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--muted);
+    margin: 0 0 10px;
+    letter-spacing: 0.01em;
+  }
+  .decision-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .decision-value {
+    font-family: var(--font-mono);
+    font-size: 17px;
+    font-weight: 600;
+  }
+  .decision-value.forward { color: var(--moss); }
+  .decision-value.turn_left, .decision-value.turn_right { color: var(--amber); }
+  .decision-value.stop { color: var(--rust); }
+  .decision-value.evade_left, .decision-value.evade_right { color: var(--alert); }
+  .decision-value.arrived { color: var(--gold); }
+  .conf-track {
+    height: 5px;
+    background: var(--line);
+    border-radius: 3px;
+    margin-top: 8px;
+    overflow: hidden;
+  }
+  .conf-fill {
+    height: 100%;
+    background: var(--dust);
+    border-radius: 3px;
+    transition: width 0.12s ease;
+  }
+  .conf-label {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 5px;
+  }
+  .sensor-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+  }
+  .sensor-cell {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    text-align: center;
+  }
+  .sensor-cell .lab {
+    font-size: 10.5px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .sensor-cell .val {
+    font-family: var(--font-mono);
+    font-size: 14px;
+  }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .toggle-label {
+    font-size: 13px;
+  }
+  .toggle-label .hint {
+    display: block;
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .switch {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    flex: none;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider-toggle {
+    position: absolute; inset: 0;
+    background: var(--line);
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .slider-toggle::before {
+    content: "";
+    position: absolute;
+    width: 16px; height: 16px;
+    left: 3px; top: 3px;
+    background: var(--muted);
+    border-radius: 50%;
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  input:checked + .slider-toggle { background: var(--dust-dim); }
+  input:checked + .slider-toggle::before { transform: translateX(18px); background: var(--dust); }
+  input:focus-visible + .slider-toggle { outline: 2px solid var(--moss); outline-offset: 2px; }
+  .range-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .range-row .rr-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .range-row .rr-head span:last-child {
+    font-family: var(--font-mono);
+    color: var(--text);
+  }
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--dust);
+  }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .stat-cell .lab { font-size: 10.5px; color: var(--muted); margin-bottom: 3px; }
+  .stat-cell .val { font-family: var(--font-mono); font-size: 14.5px; }
+  .stat-cell .val.alertv { color: var(--alert); }
+  .stat-cell .val.goldv { color: var(--gold); }
+  .threat-line {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    padding: 8px 10px;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  .threat-line.clear { color: var(--muted); }
+  .threat-line.danger { color: var(--alert); border-color: var(--alert); }
+  .threat-line.arrived { color: var(--gold); border-color: var(--gold); }
+  .log {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    max-height: 100px;
+    overflow-y: auto;
+    line-height: 1.7;
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+  }
+  .log div.recent { color: var(--text); }
+  .log div.hit { color: var(--alert); }
+  .log div.win { color: var(--gold); }
+  .note {
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--muted);
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+  }
+  .note code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--panel-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  hr.div {
+    border: none;
+    border-top: 1px solid var(--line);
+    margin: 0;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="kicker">sense → decide → act</p>
+    <h1>A rover that has to actually get somewhere — not just wander and dodge</h1>
+    <p class="sub">It now steers toward a destination while still handling walls, wind drift, and things closing in fast. Click the arena to move the destination.</p>
+  </header>
+
+  <div class="layout">
+    <div class="stage">
+      <div class="stage-head">
+        <span class="status-pill"><span class="dot" id="statusDot"></span><span id="statusText">running</span></span>
+        <span class="status-pill" id="loopRatePill">loop 150ms</span>
+      </div>
+      <canvas id="arena" width="760" height="460"></canvas>
+      <p class="canvas-hint">Click anywhere in the arena to set a new destination.</p>
+      <div class="controls-row">
+        <button class="primary" id="btnPlayPause">Pause</button>
+        <button id="btnReset">Reset</button>
+        <button id="btnStep">Step once</button>
+        <button id="btnNewDest">New random destination</button>
+        <label class="mini-toggle">
+          <input type="checkbox" id="threatsToggle" checked style="accent-color:#7C9CB3;">
+          moving threats
+        </label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div>
+        <p class="block-title">CURRENT DECISION</p>
+        <div class="decision-line">
+          <span class="decision-value forward" id="decisionVal">forward</span>
+        </div>
+        <div class="conf-track"><div class="conf-fill" id="confFill" style="width:0%"></div></div>
+        <div class="conf-label" id="confLabel">confidence 0.00</div>
+      </div>
+
+      <hr class="div">
+
+      <div>
+        <p class="block-title">NAVIGATION</p>
+        <div class="threat-line clear" id="navLine">en route — — px to go</div>
+      </div>
+
+      <hr class="div">
+
+      <div>
+        <p class="block-title">SENSORS (px to nearest object)</p>
+        <div class="sensor-grid">
+          <div class="sensor-cell"><div class="lab">left</div><div class="val" id="sLeft">—</div></div>
+          <div class="sensor-cell"><div class="lab">front</div><div class="val" id="sFront">—</div></div>
+          <div class="sensor-cell"><div class="lab">right</div><div class="val" id="sRight">—</div></div>
+        </div>
+      </div>
+
+      <hr class="div">
+
+      <div>
+        <p class="block-title">THREAT SCAN (360°)</p>
+        <div class="threat-line clear" id="threatLine">clear</div>
+      </div>
+
+      <hr class="div">
+
+      <div>
+        <p class="block-title">WIND</p>
+        <div class="toggle-row">
+          <span class="toggle-label">Wind-aware steering<span class="hint">lead the drift instead of correcting after the fact</span></span>
+          <label class="switch">
+            <input type="checkbox" id="windAwareToggle" checked>
+            <span class="slider-toggle"></span>
+          </label>
+        </div>
+        <div class="range-row" style="margin-top:12px;">
+          <div class="rr-head"><span>Max wind speed</span><span id="windSpeedVal">1.4</span></div>
+          <input type="range" id="windSpeedSlider" min="0" max="3" step="0.1" value="1.4">
+        </div>
+        <div class="range-row" style="margin-top:10px;">
+          <div class="rr-head"><span>Gustiness</span><span id="gustVal">0.5</span></div>
+          <input type="range" id="gustSlider" min="0" max="1" step="0.05" value="0.5">
+        </div>
+      </div>
+
+      <hr class="div">
+
+      <div>
+        <p class="block-title">SESSION STATS</p>
+        <div class="stat-grid">
+          <div class="stat-cell"><div class="lab">ticks</div><div class="val" id="statTicks">0</div></div>
+          <div class="stat-cell"><div class="lab">wall collisions</div><div class="val" id="statCollisions">0</div></div>
+          <div class="stat-cell"><div class="lab">evasions</div><div class="val" id="statEvasions">0</div></div>
+          <div class="stat-cell"><div class="lab">struck by threat</div><div class="val alertv" id="statHits">0</div></div>
+          <div class="stat-cell"><div class="lab">avg confidence</div><div class="val" id="statAvgConf">—</div></div>
+          <div class="stat-cell"><div class="lab">arrivals</div><div class="val goldv" id="statArrivals">0</div></div>
+          <div class="stat-cell"><div class="lab">fallback stops</div><div class="val" id="statFallbacks">0</div></div>
+        </div>
+        <div class="log" id="logBox"></div>
+      </div>
+
+      <div class="note">
+        The decision step is a pure function: current state in, one typed decision plus a confidence score out. It lives in <code>decideAction()</code> in the source.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- Arena setup ----------
+  const canvas = document.getElementById('arena');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const MARGIN = 8;
+
+  const obstacles = [
+    { x: 120, y: 70,  w: 110, h: 22 },
+    { x: 300, y: 170, w: 22,  h: 170 },
+    { x: 420, y: 55,  w: 150, h: 22 },
+    { x: 560, y: 210, w: 22,  h: 190 },
+    { x: 210, y: 340, w: 170, h: 22 },
+    { x: 470, y: 300, w: 90,  h: 22 }
+  ];
+
+  // ---------- Waypoints ----------
+  const START = { x: 60, y: 60 };
+  let destination = { x: 690, y: 400 };
+  const ARRIVE_RADIUS = 16;
+  let trail = [];
+  const TRAIL_MAX = 600;
+
+  // ---------- Rover state ----------
+  const rover = { x: START.x, y: START.y, heading: 0.35, radius: 9, speed: 62 }; // speed px/sec
+  const TURN_RATE = 2.6; // rad/sec while turning
+  const EVADE_TURN_RATE = TURN_RATE * 1.7;
+  const MAX_RANGE = 150;
+  const DANGER = 42;
+  const FALLBACK_CONF = 0.33;
+  const EVADE_RANGE = 70;
+  const EVADE_CLOSING_THRESHOLD = 55; // px/sec
+  const GOAL_HEADING_TOLERANCE = 0.12; // rad
+  const AVOID_COMMIT_TICKS = 5; // ~0.75s — long enough to actually slide clear, short enough to escape a corner
+  let avoiding = false;
+  let avoidDir = null;
+  let avoidTicksLeft = 0;
+
+  // ---------- Wind state ----------
+  const wind = { angle: Math.random() * Math.PI * 2, speed: 0.6, maxSpeed: 1.4, gust: 0.5 };
+
+  // ---------- Moving threats (birds + rogue rovers) ----------
+  const THREAT_TYPES = {
+    bird: { radius: 5, speedMin: 70, speedMax: 130, retargetMin: 1.0, retargetMax: 2.4, color: '#D9C77A' },
+    rogueRover: { radius: 10, speedMin: 35, speedMax: 55, retargetMin: 3, retargetMax: 6, color: '#9AA7AE' }
+  };
+  let threatsEnabled = true;
+  let threats = [];
+
+  function spawnThreat(kind) {
+    const cfg = THREAT_TYPES[kind];
+    const edge = Math.floor(Math.random() * 4);
+    let x, y;
+    if (edge === 0) { x = MARGIN + 4; y = Math.random() * H; }
+    else if (edge === 1) { x = W - MARGIN - 4; y = Math.random() * H; }
+    else if (edge === 2) { x = Math.random() * W; y = MARGIN + 4; }
+    else { x = Math.random() * W; y = H - MARGIN - 4; }
+    const angle = Math.random() * Math.PI * 2;
+    const speed = cfg.speedMin + Math.random() * (cfg.speedMax - cfg.speedMin);
+    return {
+      kind, x, y,
+      vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+      radius: cfg.radius, color: cfg.color,
+      retarget: cfg.retargetMin + Math.random() * (cfg.retargetMax - cfg.retargetMin),
+      wasHit: false
+    };
+  }
+
+  function initThreats() {
+    threats = [spawnThreat('bird'), spawnThreat('bird'), spawnThreat('bird'), spawnThreat('rogueRover')];
+  }
+  initThreats();
+
+  function updateThreats(dtSec) {
+    if (!threatsEnabled) return;
+    for (const t of threats) {
+      const cfg = THREAT_TYPES[t.kind];
+      t.retarget -= dtSec;
+      if (t.retarget <= 0) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = cfg.speedMin + Math.random() * (cfg.speedMax - cfg.speedMin);
+        t.vx = Math.cos(angle) * speed;
+        t.vy = Math.sin(angle) * speed;
+        t.retarget = cfg.retargetMin + Math.random() * (cfg.retargetMax - cfg.retargetMin);
+      }
+      t.x += t.vx * dtSec;
+      t.y += t.vy * dtSec;
+      if (t.x < MARGIN + t.radius) { t.x = MARGIN + t.radius; t.vx *= -1; }
+      if (t.x > W - MARGIN - t.radius) { t.x = W - MARGIN - t.radius; t.vx *= -1; }
+      if (t.y < MARGIN + t.radius) { t.y = MARGIN + t.radius; t.vy *= -1; }
+      if (t.y > H - MARGIN - t.radius) { t.y = H - MARGIN - t.radius; t.vy *= -1; }
+    }
+  }
+
+  // ---------- 360° sensor ring (for rendering + evade-direction only) ----------
+  const RING_OFFSETS = [0, Math.PI/4, Math.PI/2, 3*Math.PI/4, Math.PI, -3*Math.PI/4, -Math.PI/2, -Math.PI/4];
+  const RING_LABELS = ['front', 'front-right', 'right', 'back-right', 'back', 'back-left', 'left', 'front-left'];
+  let ringDist = new Array(8).fill(MAX_RANGE);
+  let prevRoverPos = { x: rover.x, y: rover.y };
+
+  // ---------- Sim control ----------
+  let running = true;
+  let lastFrame = performance.now();
+  let lastDecisionAt = 0;
+  const DECISION_INTERVAL = 150; // ms, mimics a real control-loop tick rate
+
+  let current = { decision: 'forward', confidence: 0.7, threatIdx: -1 };
+  let sensors = { left: MAX_RANGE, front: MAX_RANGE, right: MAX_RANGE };
+  let distanceToGoal = Infinity;
+
+  let stats = { ticks: 0, collisions: 0, fallbacks: 0, evasions: 0, hits: 0, arrivals: 0, confSum: 0, confCount: 0 };
+  const logEntries = [];
+
+  // ---------- DOM refs ----------
+  const el = {
+    decisionVal: document.getElementById('decisionVal'),
+    confFill: document.getElementById('confFill'),
+    confLabel: document.getElementById('confLabel'),
+    navLine: document.getElementById('navLine'),
+    sLeft: document.getElementById('sLeft'),
+    sFront: document.getElementById('sFront'),
+    sRight: document.getElementById('sRight'),
+    threatLine: document.getElementById('threatLine'),
+    statTicks: document.getElementById('statTicks'),
+    statCollisions: document.getElementById('statCollisions'),
+    statAvgConf: document.getElementById('statAvgConf'),
+    statFallbacks: document.getElementById('statFallbacks'),
+    statEvasions: document.getElementById('statEvasions'),
+    statHits: document.getElementById('statHits'),
+    statArrivals: document.getElementById('statArrivals'),
+    logBox: document.getElementById('logBox'),
+    statusDot: document.getElementById('statusDot'),
+    statusText: document.getElementById('statusText'),
+    windAwareToggle: document.getElementById('windAwareToggle'),
+    windSpeedSlider: document.getElementById('windSpeedSlider'),
+    windSpeedVal: document.getElementById('windSpeedVal'),
+    gustSlider: document.getElementById('gustSlider'),
+    gustVal: document.getElementById('gustVal'),
+    threatsToggle: document.getElementById('threatsToggle'),
+    btnPlayPause: document.getElementById('btnPlayPause'),
+    btnReset: document.getElementById('btnReset'),
+    btnStep: document.getElementById('btnStep'),
+    btnNewDest: document.getElementById('btnNewDest')
+  };
+
+  // ---------- Geometry helpers ----------
+  function pointInRect(px, py, r) {
+    return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+  }
+
+  function pointBlocked(px, py) {
+    if (px < MARGIN || px > W - MARGIN || py < MARGIN || py > H - MARGIN) return true;
+    for (const o of obstacles) if (pointInRect(px, py, o)) return true;
+    if (threatsEnabled) {
+      for (const t of threats) {
+        const dx = px - t.x, dy = py - t.y;
+        if (dx * dx + dy * dy < t.radius * t.radius) return true;
+      }
+    }
+    return false;
+  }
+
+  function castRay(x, y, angle) {
+    const step = 4;
+    let dist = 0;
+    while (dist < MAX_RANGE) {
+      dist += step;
+      const px = x + Math.cos(angle) * dist;
+      const py = y + Math.sin(angle) * dist;
+      if (pointBlocked(px, py)) return Math.max(0, dist - step);
+    }
+    return MAX_RANGE;
+  }
+
+  function readSensors() {
+    return {
+      left: castRay(rover.x, rover.y, rover.heading - 0.78),
+      front: castRay(rover.x, rover.y, rover.heading),
+      right: castRay(rover.x, rover.y, rover.heading + 0.78)
+    };
+  }
+
+  function readRing() {
+    const out = new Array(8);
+    for (let i = 0; i < 8; i++) out[i] = castRay(rover.x, rover.y, rover.heading + RING_OFFSETS[i]);
+    return out;
+  }
+
+  function wrapAngle(a) {
+    while (a > Math.PI) a -= Math.PI * 2;
+    while (a < -Math.PI) a += Math.PI * 2;
+    return a;
+  }
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  // Distance (and direction) from the rover's actual center to the nearest
+  // point on any obstacle or arena wall, in every direction — not just
+  // along the 3 narrow front/left/right sensor rays. The 3 rays alone can
+  // miss a corner that the rover's own body (a 9px-radius disk) would still
+  // clip while going around it at an angle, since a corner can sit just
+  // outside all three ray angles and still be within the rover's swept path.
+  function nearestObstruction(x, y) {
+    let bestDist = Infinity, bestPX = x, bestPY = y;
+    const distLeft = x - MARGIN, distRight = (W - MARGIN) - x;
+    const distTop = y - MARGIN, distBottom = (H - MARGIN) - y;
+    if (distLeft < bestDist) { bestDist = distLeft; bestPX = MARGIN; bestPY = y; }
+    if (distRight < bestDist) { bestDist = distRight; bestPX = W - MARGIN; bestPY = y; }
+    if (distTop < bestDist) { bestDist = distTop; bestPX = x; bestPY = MARGIN; }
+    if (distBottom < bestDist) { bestDist = distBottom; bestPX = x; bestPY = H - MARGIN; }
+    for (const o of obstacles) {
+      const cx = clamp(x, o.x, o.x + o.w), cy = clamp(y, o.y, o.y + o.h);
+      const d = Math.hypot(x - cx, y - cy);
+      if (d < bestDist) { bestDist = d; bestPX = cx; bestPY = cy; }
+    }
+    return { dist: bestDist, angle: Math.atan2(bestPY - y, bestPX - x) };
+  }
+
+  // ---------- The decision engine ----------
+  // Pure function: pass in the current state, get back one typed decision
+  // plus a confidence score.
+  function decideAction(state) {
+    const { sensors, windAware, wind, destination, threats, threatsEnabled, roverVel } = state;
+
+    // Priority 1: something is closing in fast, including from behind.
+    // Computed directly from each threat's actual velocity relative to the
+    // rover's own velocity — not by diffing ring-sensor readings tick to
+    // tick, which falsely reads "closing" whenever the rover simply turns
+    // (a static wall looks like it's rushing at you if your own heading
+    // rotates, since the ring is sampled relative to heading).
+    // This overrides everything — even arrival and the low-confidence-stop
+    // fallback, since stopping is the wrong move when something's about to
+    // hit you.
+    let bestThreat = null, bestScore = -Infinity, bestClosing = 0, bestDist = 0, bestAngle = 0;
+    if (threatsEnabled) {
+      for (const t of threats) {
+        const dx = t.x - rover.x, dy = t.y - rover.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < EVADE_RANGE && dist > 0.001) {
+          const ux = dx / dist, uy = dy / dist;
+          const relVx = t.vx - roverVel.vx, relVy = t.vy - roverVel.vy;
+          const closingSpeed = -(relVx * ux + relVy * uy); // positive = closing
+          if (closingSpeed > EVADE_CLOSING_THRESHOLD) {
+            const score = closingSpeed / Math.max(1, dist);
+            if (score > bestScore) { bestScore = score; bestThreat = t; bestClosing = closingSpeed; bestDist = dist; bestAngle = Math.atan2(dy, dx); }
+          }
+        }
+      }
+    }
+    if (bestThreat) {
+      const relHeading = wrapAngle(bestAngle - rover.heading);
+      const offsetDeg = (relHeading * 180 / Math.PI + 360) % 360;
+      let decision;
+      if (Math.abs(relHeading) < 0.02 || Math.abs(Math.abs(relHeading) - Math.PI) < 0.02) {
+        decision = sensors.left > sensors.right ? 'evade_left' : 'evade_right';
+      } else if (offsetDeg > 0 && offsetDeg < 180) {
+        decision = 'evade_left'; // threat on the right-hand side, dodge left
+      } else {
+        decision = 'evade_right';
+      }
+      const confidence = clamp(bestClosing / 160, 0.35, 0.95);
+      let nearestIdx = 0, nearestDiff = Infinity;
+      for (let i = 0; i < 8; i++) {
+        const diff = Math.abs(wrapAngle(RING_OFFSETS[i] - relHeading));
+        if (diff < nearestDiff) { nearestDiff = diff; nearestIdx = i; }
+      }
+      return { decision, confidence, fellBack: false, threatIdx: nearestIdx, threatDist: bestDist, threatClosing: bestClosing };
+    }
+
+    // Priority 2: arrived at the destination.
+    const distGoal = Math.hypot(destination.x - rover.x, destination.y - rover.y);
+    if (distGoal < ARRIVE_RADIUS) {
+      return { decision: 'arrived', confidence: 1, fellBack: false, threatIdx: -1 };
+    }
+
+    // Priority 3: something is too close to the rover's actual body AND
+    // roughly in its direction of travel — checked against the real body
+    // (not just the 3 narrow sensor rays, so a corner just off to the side
+    // can't sneak past), but restricted to a forward-facing arc so merely
+    // passing near a wall on the way somewhere else doesn't trigger it.
+    //
+    // This commits to a turn direction for a short burst (AVOID_COMMIT_TICKS)
+    // rather than re-deciding fresh every tick. Without it, the rover nudges
+    // away from a wall, goal-steering immediately re-aims straight back at
+    // it (since the destination is still beyond it), and it bounces in
+    // place forever instead of sliding along the wall far enough to clear
+    // its edge. The commit is bounded, not held until fully clear — an
+    // unbounded lock can pin the rover in a corner where the chosen
+    // direction never gains clearance; re-evaluating every ~0.75s lets it
+    // recover and try the other way if the first choice wasn't working.
+    let decision, confidence, turnAmount;
+    const nearest = nearestObstruction(rover.x, rover.y);
+    const relAngle = wrapAngle(nearest.angle - rover.heading);
+    const stillTooClose = nearest.dist < DANGER && Math.cos(relAngle) > 0.15;
+
+    if (avoiding && avoidTicksLeft > 0 && stillTooClose) {
+      avoidTicksLeft--; // keep sliding the committed direction for the rest of this burst
+    } else {
+      avoiding = stillTooClose;
+      if (avoiding) {
+        const offsetDeg = (relAngle * 180 / Math.PI + 360) % 360;
+        if (Math.abs(relAngle) < 0.05) {
+          avoidDir = sensors.left > sensors.right ? 'turn_left' : 'turn_right';
+        } else if (offsetDeg > 0 && offsetDeg < 180) {
+          avoidDir = 'turn_left'; // obstruction on the right-hand side, turn away
+        } else {
+          avoidDir = 'turn_right';
+        }
+        avoidTicksLeft = AVOID_COMMIT_TICKS;
+      } else {
+        avoidDir = null;
+      }
+    }
+
+    if (avoiding) {
+      decision = avoidDir;
+      confidence = clamp((DANGER - Math.min(nearest.dist, DANGER)) / DANGER + 0.4, 0.3, 0.95);
+    } else {
+      // Priority 4: steer toward the destination. Wind-aware mode leads the
+      // aim point upwind of the direct line so drift doesn't push it off
+      // course; wind-blind mode aims straight at the destination and just
+      // keeps re-correcting every tick as the wind blows it around.
+      let goalHeading = Math.atan2(destination.y - rover.y, destination.x - rover.x);
+      if (windAware) {
+        const lateralWind = Math.sin(wind.angle - goalHeading) * wind.speed;
+        goalHeading -= clamp(lateralWind * 0.6, -0.6, 0.6);
+      }
+      const headingDiff = wrapAngle(goalHeading - rover.heading);
+      if (Math.abs(headingDiff) > GOAL_HEADING_TOLERANCE) {
+        decision = headingDiff > 0 ? 'turn_right' : 'turn_left';
+        // Turn exactly as much as needed, capped at the max turn rate —
+        // a fixed full-rate step here would overshoot a tight heading
+        // tolerance almost every tick and oscillate instead of settling.
+        turnAmount = clamp(Math.abs(headingDiff), 0, TURN_RATE * (DECISION_INTERVAL / 1000));
+        confidence = clamp(1 - Math.abs(headingDiff) / Math.PI, 0.4, 0.95);
+      } else {
+        decision = 'forward';
+        confidence = clamp(sensors.front / MAX_RANGE, 0.6, 0.97);
+      }
+    }
+
+    confidence = clamp(confidence + (Math.random() - 0.5) * 0.08, 0.05, 0.99);
+
+    let fellBack = false;
+    if (confidence < FALLBACK_CONF) {
+      decision = 'stop';
+      fellBack = true;
+    }
+
+    return { decision, confidence, fellBack, threatIdx: -1, turnAmount };
+  }
+
+  // ---------- Sim step ----------
+  function updateWind(dtSec) {
+    const driftRate = 0.6 * wind.gust;
+    const gustRate = 0.5 * wind.gust;
+    wind.angle += (Math.random() - 0.5) * driftRate * dtSec;
+    wind.speed = clamp(wind.speed + (Math.random() - 0.5) * gustRate * dtSec, 0, wind.maxSpeed);
+  }
+
+  function applyDecision(decision, dtSec, turnAmount) {
+    if (decision === 'forward') {
+      rover.x += Math.cos(rover.heading) * rover.speed * dtSec;
+      rover.y += Math.sin(rover.heading) * rover.speed * dtSec;
+    } else if (decision === 'turn_left') {
+      rover.heading -= (turnAmount !== undefined ? turnAmount : TURN_RATE * dtSec);
+      rover.x += Math.cos(rover.heading) * rover.speed * 0.55 * dtSec;
+      rover.y += Math.sin(rover.heading) * rover.speed * 0.55 * dtSec;
+    } else if (decision === 'turn_right') {
+      rover.heading += (turnAmount !== undefined ? turnAmount : TURN_RATE * dtSec);
+      rover.x += Math.cos(rover.heading) * rover.speed * 0.55 * dtSec;
+      rover.y += Math.sin(rover.heading) * rover.speed * 0.55 * dtSec;
+    } else if (decision === 'evade_left') {
+      rover.heading -= EVADE_TURN_RATE * dtSec;
+      rover.x += Math.cos(rover.heading) * rover.speed * 0.9 * dtSec;
+      rover.y += Math.sin(rover.heading) * rover.speed * 0.9 * dtSec;
+    } else if (decision === 'evade_right') {
+      rover.heading += EVADE_TURN_RATE * dtSec;
+      rover.x += Math.cos(rover.heading) * rover.speed * 0.9 * dtSec;
+      rover.y += Math.sin(rover.heading) * rover.speed * 0.9 * dtSec;
+    }
+    // 'stop' and 'arrived' — no self-propelled movement this tick
+  }
+
+  function applyWindPush(dtSec) {
+    const pushScale = 26; // px/sec per unit wind speed
+    rover.x += Math.cos(wind.angle) * wind.speed * pushScale * dtSec;
+    rover.y += Math.sin(wind.angle) * wind.speed * pushScale * dtSec;
+  }
+
+  let wasWallCollided = false;
+
+  function resolveCollisions() {
+    let collided = false;
+    if (rover.x < MARGIN + rover.radius) { rover.x = MARGIN + rover.radius; collided = true; }
+    if (rover.x > W - MARGIN - rover.radius) { rover.x = W - MARGIN - rover.radius; collided = true; }
+    if (rover.y < MARGIN + rover.radius) { rover.y = MARGIN + rover.radius; collided = true; }
+    if (rover.y > H - MARGIN - rover.radius) { rover.y = H - MARGIN - rover.radius; collided = true; }
+
+    for (const o of obstacles) {
+      const cx = clamp(rover.x, o.x, o.x + o.w);
+      const cy = clamp(rover.y, o.y, o.y + o.h);
+      const dx = rover.x - cx, dy = rover.y - cy;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < rover.radius) {
+        collided = true;
+        const push = (rover.radius - d) + 0.5;
+        if (d > 0.001) {
+          rover.x += (dx / d) * push;
+          rover.y += (dy / d) * push;
+        } else {
+          rover.x += push;
+        }
+        rover.heading += Math.PI * 0.5 * (Math.random() < 0.5 ? 1 : -1) * 0.3;
+      }
+    }
+    // Count a bump once per contact event (edge-triggered), not once per
+    // frame the rover happens to still be touching — a single graze can
+    // span several frames before it's fully pushed clear.
+    if (collided && !wasWallCollided) {
+      stats.collisions++;
+      pushLog('collision — bounced clear', 'collision');
+    }
+    wasWallCollided = collided;
+
+    if (threatsEnabled) {
+      for (const t of threats) {
+        const dx = rover.x - t.x, dy = rover.y - t.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const minD = rover.radius + t.radius;
+        const isHit = d < minD;
+        if (isHit && !t.wasHit) {
+          stats.hits++;
+          pushLog('struck by ' + (t.kind === 'bird' ? 'a bird' : 'a rogue rover'), 'hit');
+          const push = (minD - d) + 1;
+          if (d > 0.001) {
+            rover.x += (dx / d) * push;
+            rover.y += (dy / d) * push;
+            t.vx = -(dx / d) * Math.abs(t.vx || 40);
+            t.vy = -(dy / d) * Math.abs(t.vy || 40);
+          }
+        }
+        t.wasHit = isHit;
+      }
+    }
+  }
+
+  function pushLog(text, kind) {
+    const t = (stats.ticks / (1000 / DECISION_INTERVAL)).toFixed(1);
+    logEntries.unshift({ text: 't+' + t + 's  ' + text, kind: kind || '' });
+    if (logEntries.length > 40) logEntries.pop();
+  }
+
+  let wasArrived = false;
+
+  function decisionTick() {
+    sensors = readSensors();
+    ringDist = readRing();
+
+    const dtSec = DECISION_INTERVAL / 1000;
+    const roverVel = {
+      vx: (rover.x - prevRoverPos.x) / dtSec,
+      vy: (rover.y - prevRoverPos.y) / dtSec
+    };
+
+    const windAware = el.windAwareToggle.checked;
+    const result = decideAction({ sensors, windAware, wind, destination, threats, threatsEnabled, roverVel });
+    current = result;
+    distanceToGoal = Math.hypot(destination.x - rover.x, destination.y - rover.y);
+
+    stats.ticks++;
+    stats.confSum += result.confidence;
+    stats.confCount++;
+
+    if (result.decision === 'arrived') {
+      if (!wasArrived) {
+        stats.arrivals++;
+        pushLog('reached destination', 'win');
+        wasArrived = true;
+      }
+    } else {
+      wasArrived = false;
+      if (result.decision === 'evade_left' || result.decision === 'evade_right') {
+        stats.evasions++;
+        const kindNear = threatsEnabled ? nearestThreatKindAt(result.threatIdx) : '';
+        pushLog('evade ' + (result.decision === 'evade_left' ? 'left' : 'right') +
+          '  (conf ' + result.confidence.toFixed(2) + ')  — ' + RING_LABELS[result.threatIdx] +
+          (kindNear ? ' ' + kindNear : ''), 'evade');
+      } else if (result.fellBack) {
+        stats.fallbacks++;
+        pushLog('low confidence → safety stop');
+      } else if (result.decision !== 'forward') {
+        pushLog(result.decision.replace('_', ' ') + '  (conf ' + result.confidence.toFixed(2) + ')');
+      }
+    }
+
+    applyDecision(result.decision, dtSec, result.turnAmount);
+
+    prevRoverPos = { x: rover.x, y: rover.y };
+    trail.push({ x: rover.x, y: rover.y });
+    if (trail.length > TRAIL_MAX) trail.shift();
+  }
+
+  function nearestThreatKindAt(ringIdx) {
+    if (ringIdx < 0 || !threatsEnabled) return '';
+    let best = null, bestD = Infinity;
+    const angle = rover.heading + RING_OFFSETS[ringIdx];
+    for (const t of threats) {
+      const dx = t.x - rover.x, dy = t.y - rover.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const a = Math.atan2(dy, dx);
+      let diff = Math.abs(((a - angle + Math.PI) % (Math.PI * 2)) - Math.PI);
+      if (diff < 0.5 && d < bestD) { bestD = d; best = t; }
+    }
+    return best ? '(' + (best.kind === 'bird' ? 'bird' : 'rover') + ')' : '';
+  }
+
+  function frame(now) {
+    const dtSec = Math.min(0.05, (now - lastFrame) / 1000);
+    lastFrame = now;
+
+    if (running) {
+      updateWind(dtSec);
+      applyWindPush(dtSec);
+      updateThreats(dtSec);
+      resolveCollisions();
+
+      if (now - lastDecisionAt >= DECISION_INTERVAL) {
+        lastDecisionAt = now;
+        decisionTick();
+        updateHUD();
+      }
+    }
+
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- Rendering ----------
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    // grid
+    ctx.strokeStyle = 'rgba(143,160,137,0.06)';
+    ctx.lineWidth = 1;
+    for (let gx = 0; gx < W; gx += 38) { ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke(); }
+    for (let gy = 0; gy < H; gy += 38) { ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke(); }
+
+    // bounds
+    ctx.strokeStyle = '#2B332C';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(MARGIN, MARGIN, W - MARGIN * 2, H - MARGIN * 2);
+
+    // obstacles
+    ctx.fillStyle = '#28312A';
+    ctx.strokeStyle = '#3A463C';
+    ctx.lineWidth = 1;
+    for (const o of obstacles) {
+      ctx.fillRect(o.x, o.y, o.w, o.h);
+      ctx.strokeRect(o.x, o.y, o.w, o.h);
+    }
+
+    // wind field arrows (ambient indicator)
+    ctx.strokeStyle = 'rgba(124,156,179,0.35)';
+    ctx.lineWidth = 1.2;
+    const spacing = 95;
+    for (let gx = 40; gx < W; gx += spacing) {
+      for (let gy = 40; gy < H; gy += spacing) {
+        const len = 8 + wind.speed * 9;
+        const ex = gx + Math.cos(wind.angle) * len;
+        const ey = gy + Math.sin(wind.angle) * len;
+        ctx.beginPath();
+        ctx.moveTo(gx, gy);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+      }
+    }
+
+    // breadcrumb trail
+    if (trail.length > 1) {
+      ctx.strokeStyle = 'rgba(217,199,122,0.35)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(trail[0].x, trail[0].y);
+      for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i].x, trail[i].y);
+      ctx.stroke();
+    }
+
+    // start marker
+    ctx.fillStyle = 'rgba(124,156,179,0.9)';
+    ctx.beginPath();
+    ctx.arc(START.x, START.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(124,156,179,0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(START.x, START.y, 9, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // destination marker (target rings)
+    ctx.strokeStyle = 'rgba(217,199,122,0.9)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(destination.x, destination.y, 11, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(destination.x, destination.y, 5, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(217,199,122,0.9)';
+    ctx.beginPath(); ctx.arc(destination.x, destination.y, 1.6, 0, Math.PI * 2); ctx.fill();
+
+    // threats
+    if (threatsEnabled) {
+      for (const t of threats) {
+        ctx.fillStyle = t.color;
+        if (t.kind === 'bird') {
+          const a = Math.atan2(t.vy, t.vx);
+          ctx.save();
+          ctx.translate(t.x, t.y);
+          ctx.rotate(a);
+          ctx.beginPath();
+          ctx.moveTo(t.radius + 2, 0);
+          ctx.lineTo(-t.radius, t.radius * 0.9);
+          ctx.lineTo(-t.radius * 0.3, 0);
+          ctx.lineTo(-t.radius, -t.radius * 0.9);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        } else {
+          ctx.save();
+          ctx.translate(t.x, t.y);
+          ctx.rotate(Math.atan2(t.vy, t.vx));
+          ctx.fillRect(-t.radius, -t.radius * 0.7, t.radius * 2, t.radius * 1.4);
+          ctx.restore();
+        }
+      }
+    }
+
+    // sensor ring (faint) + threat ray highlight
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 8; i++) {
+      const angle = rover.heading + RING_OFFSETS[i];
+      const d = ringDist[i];
+      const isThreatRay = current.threatIdx === i;
+      ctx.strokeStyle = isThreatRay ? 'rgba(232,115,90,0.85)' : (d < EVADE_RANGE ? 'rgba(224,164,88,0.25)' : 'rgba(127,191,138,0.14)');
+      ctx.lineWidth = isThreatRay ? 2 : 1;
+      ctx.beginPath();
+      ctx.moveTo(rover.x, rover.y);
+      ctx.lineTo(rover.x + Math.cos(angle) * d, rover.y + Math.sin(angle) * d);
+      ctx.stroke();
+    }
+
+    // rover
+    ctx.save();
+    ctx.translate(rover.x, rover.y);
+    ctx.rotate(rover.heading);
+    let roverColor = '#7FBF8A';
+    if (current.decision === 'stop') roverColor = '#C4593F';
+    else if (current.decision === 'evade_left' || current.decision === 'evade_right') roverColor = '#E8735A';
+    else if (current.decision === 'turn_left' || current.decision === 'turn_right') roverColor = '#E0A458';
+    else if (current.decision === 'arrived') roverColor = '#D9C77A';
+    ctx.fillStyle = roverColor;
+    ctx.beginPath();
+    ctx.moveTo(rover.radius + 4, 0);
+    ctx.lineTo(-rover.radius, rover.radius * 0.85);
+    ctx.lineTo(-rover.radius, -rover.radius * 0.85);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    if (current.decision === 'arrived') {
+      ctx.strokeStyle = 'rgba(217,199,122,0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(rover.x, rover.y, 15, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  // ---------- HUD ----------
+  function updateHUD() {
+    el.decisionVal.textContent = current.decision.replace('_', ' ');
+    el.decisionVal.className = 'decision-value ' + current.decision;
+    el.confFill.style.width = Math.round(current.confidence * 100) + '%';
+    el.confLabel.textContent = 'confidence ' + current.confidence.toFixed(2) + (current.fellBack ? '  ·  fallback stop' : '');
+
+    if (current.decision === 'arrived') {
+      el.navLine.textContent = 'arrived at destination';
+      el.navLine.className = 'threat-line arrived';
+    } else {
+      el.navLine.textContent = 'en route — ' + Math.round(distanceToGoal) + 'px to go';
+      el.navLine.className = 'threat-line clear';
+    }
+
+    el.sLeft.textContent = Math.round(sensors.left);
+    el.sFront.textContent = Math.round(sensors.front);
+    el.sRight.textContent = Math.round(sensors.right);
+
+    if (current.threatIdx !== -1) {
+      const label = RING_LABELS[current.threatIdx];
+      el.threatLine.textContent = 'closing fast — ' + label + '  (' + Math.round(current.threatDist) + 'px, ' + Math.round(current.threatClosing) + 'px/s)';
+      el.threatLine.className = 'threat-line danger';
+    } else {
+      el.threatLine.textContent = 'clear';
+      el.threatLine.className = 'threat-line clear';
+    }
+
+    el.statTicks.textContent = stats.ticks;
+    el.statCollisions.textContent = stats.collisions;
+    el.statFallbacks.textContent = stats.fallbacks;
+    el.statEvasions.textContent = stats.evasions;
+    el.statHits.textContent = stats.hits;
+    el.statArrivals.textContent = stats.arrivals;
+    el.statAvgConf.textContent = stats.confCount ? (stats.confSum / stats.confCount).toFixed(2) : '—';
+
+    el.logBox.innerHTML = logEntries.slice(0, 10).map((e, i) =>
+      '<div class="' + (e.kind === 'hit' ? 'hit' : (e.kind === 'win' ? 'win' : (i === 0 ? 'recent' : ''))) + '">' + escapeHtml(e.text) + '</div>'
+    ).join('');
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  }
+
+  // ---------- Controls ----------
+  function reset() {
+    rover.x = START.x; rover.y = START.y; rover.heading = 0.35;
+    wind.angle = Math.random() * Math.PI * 2;
+    wind.speed = wind.maxSpeed * 0.4;
+    initThreats();
+    prevRoverPos = { x: rover.x, y: rover.y };
+    trail = [];
+    wasArrived = false;
+    wasWallCollided = false;
+    avoiding = false;
+    avoidDir = null;
+    avoidTicksLeft = 0;
+    stats = { ticks: 0, collisions: 0, fallbacks: 0, evasions: 0, hits: 0, arrivals: 0, confSum: 0, confCount: 0 };
+    logEntries.length = 0;
+    current = { decision: 'forward', confidence: 0.7, threatIdx: -1 };
+    sensors = readSensors();
+    ringDist = readRing();
+    updateHUD();
+  }
+
+  function nudgeOutOfObstacles(px, py) {
+    let x = clamp(px, MARGIN + 4, W - MARGIN - 4);
+    let y = clamp(py, MARGIN + 4, H - MARGIN - 4);
+    const pad = 16;
+    for (const o of obstacles) {
+      const rx0 = o.x - pad, ry0 = o.y - pad, rx1 = o.x + o.w + pad, ry1 = o.y + o.h + pad;
+      if (x > rx0 && x < rx1 && y > ry0 && y < ry1) {
+        const dLeft = x - rx0, dRight = rx1 - x, dTop = y - ry0, dBottom = ry1 - y;
+        const minD = Math.min(dLeft, dRight, dTop, dBottom);
+        if (minD === dLeft) x = rx0; else if (minD === dRight) x = rx1; else if (minD === dTop) y = ry0; else y = ry1;
+      }
+    }
+    return { x: clamp(x, MARGIN + 4, W - MARGIN - 4), y: clamp(y, MARGIN + 4, H - MARGIN - 4) };
+  }
+
+  function pickRandomDestination() {
+    let px, py, tries = 0;
+    do {
+      px = MARGIN + 30 + Math.random() * (W - MARGIN * 2 - 60);
+      py = MARGIN + 30 + Math.random() * (H - MARGIN * 2 - 60);
+      tries++;
+    } while (tries < 30 && obstacles.some(o => pointInRect(px, py, { x: o.x - 20, y: o.y - 20, w: o.w + 40, h: o.h + 40 })));
+    destination = { x: px, y: py };
+    wasArrived = false;
+    trail = [];
+  }
+
+  el.btnPlayPause.addEventListener('click', () => {
+    running = !running;
+    el.btnPlayPause.textContent = running ? 'Pause' : 'Resume';
+    el.statusText.textContent = running ? 'running' : 'paused';
+    el.statusDot.classList.toggle('paused', !running);
+  });
+
+  el.btnReset.addEventListener('click', reset);
+
+  el.btnStep.addEventListener('click', () => {
+    if (running) return;
+    updateThreats(DECISION_INTERVAL / 1000);
+    decisionTick();
+    resolveCollisions();
+    updateHUD();
+    render();
+  });
+
+  el.btnNewDest.addEventListener('click', pickRandomDestination);
+
+  canvas.addEventListener('click', (ev) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = W / rect.width, scaleY = H / rect.height;
+    const px = (ev.clientX - rect.left) * scaleX;
+    const py = (ev.clientY - rect.top) * scaleY;
+    // A destination placed inside a wall would be permanently unreachable —
+    // push it to the nearest point just outside instead of accepting it.
+    destination = nudgeOutOfObstacles(px, py);
+    wasArrived = false;
+    trail = [];
+  });
+
+  el.windSpeedSlider.addEventListener('input', () => {
+    wind.maxSpeed = parseFloat(el.windSpeedSlider.value);
+    el.windSpeedVal.textContent = wind.maxSpeed.toFixed(1);
+    wind.speed = Math.min(wind.speed, wind.maxSpeed);
+  });
+
+  el.gustSlider.addEventListener('input', () => {
+    wind.gust = parseFloat(el.gustSlider.value);
+    el.gustVal.textContent = wind.gust.toFixed(2);
+  });
+
+  el.threatsToggle.addEventListener('change', () => {
+    threatsEnabled = el.threatsToggle.checked;
+  });
+
+  // ---------- Init ----------
+  sensors = readSensors();
+  ringDist = readRing();
+  updateHUD();
+  requestAnimationFrame((t) => { lastFrame = t; lastDecisionAt = t; frame(t); });
+})();
+</script>
+</body>
+</html>
