@@ -7,7 +7,7 @@
 // simStep() at 60 Hz for many randomized trials.
 //
 // Usage: node tests/stress.js [trials=200] [maxSimSeconds=200] [scenario=all]
-//   scenario: default | random | multistop (4 stops) | multistop7 | grover | all
+//   scenario: default | random | multistop (4 stops) | multistop7 | grover | qaoa | all
 
 const fs = require('fs');
 const path = require('path');
@@ -41,19 +41,22 @@ const DRIVER = `
              rtbs: mission.rtbs || 0, minCharge: __minCharge };
   }
   return {
-    // The embedded Grover order must still be optimal under this planner —
-    // fails if the map or cost constants changed without re-running the
-    // Qiskit script (the stale-embed trap the README warns about).
-    groverCheck() {
-      const dist = distanceMatrix([BASE, ...GROVER_DELIVERY.stops]);
-      const best = walkTour(bestOrder(dist, GROVER_DELIVERY.stops.length, 100).order, dist, 100).time;
-      const grover = walkTour(GROVER_DELIVERY.order, dist, 100).time;
-      return { best, grover, ok: grover <= best * 1.01 };
+    // Embedded quantum-chosen orders must still be optimal under this
+    // planner — fails if the map or cost constants changed without
+    // re-running the Qiskit scripts (the stale-embed trap the README warns about).
+    quantumChecks() {
+      return [['grover', GROVER_DELIVERY], ['qaoa', QAOA_DELIVERY]].map(([name, Q]) => {
+        const dist = distanceMatrix([BASE, ...Q.stops]);
+        const best = walkTour(bestOrder(dist, Q.stops.length, 100).order, dist, 100).time;
+        const got = walkTour(Q.order, dist, 100).time;
+        return { name, best, got, ok: got <= best * 1.01 };
+      });
     },
     run(maxT, scenario) {
       reset();
       if (scenario === 'random') pickRandomDestination();
       if (scenario === 'grover') planMission(GROVER_DELIVERY.stops.map(p => ({ ...p })), { order: GROVER_DELIVERY.order.slice(), method: 'grover' });
+      if (scenario === 'qaoa') planMission(QAOA_DELIVERY.stops.map(p => ({ ...p })), { order: QAOA_DELIVERY.order.slice(), method: 'qaoa' });
       if (scenario.startsWith('multistop')) {
         const stops = [], n = Number(scenario.slice(9)) || 4;
         for (let i = 0; i < n; i++) stops.push(randomFreePoint());
@@ -104,11 +107,12 @@ function runScenario(name) {
   return { ok, nonFinite, depleted };
 }
 
-const scenarios = SCENARIO === 'all' ? ['default', 'random', 'multistop', 'multistop7', 'grover'] : [SCENARIO];
+const scenarios = SCENARIO === 'all' ? ['default', 'random', 'multistop', 'multistop7', 'grover', 'qaoa'] : [SCENARIO];
 let failed = false;
-const gc = makeSim(1).groverCheck();
-console.log(`[grover-check] embedded order ${gc.grover.toFixed(2)}s vs planner optimum ${gc.best.toFixed(2)}s -> ${gc.ok ? 'OK' : 'STALE: re-run qiskit/grover_delivery_order.py'}`);
-if (!gc.ok) failed = true;
+for (const c of makeSim(1).quantumChecks()) {
+  console.log(`[${c.name}-check] embedded order ${c.got.toFixed(2)}s vs planner optimum ${c.best.toFixed(2)}s -> ${c.ok ? 'OK' : 'STALE: re-run qiskit/' + c.name + '_delivery_order.py'}`);
+  if (!c.ok) failed = true;
+}
 for (const s of scenarios) {
   const r = runScenario(s);
   if (r.nonFinite > 0 || r.depleted > 0) failed = true;

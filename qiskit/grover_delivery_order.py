@@ -43,82 +43,23 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.circuit.library import DiagonalGate
 from qiskit_aer import AerSimulator
 
-import nav_map as nm
+import delivery_model as dm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SEED = 17  # chosen so the optimal order is not the stops' generation order (seed 7 was — a confusing demo)
 
 # ---------------------------------------------------------------------------
-# 1. Mission + cost model — mirrors planMission/walkTour in rover-sim-3d.html
+# 1. Mission + cost model (shared with the QAOA demo — see delivery_model.py)
 # ---------------------------------------------------------------------------
-BASE = (60.0, 60.0)
-ROVER_SPEED = 62.0
-FLY_DRAIN, ENERGY_MARGIN, RESERVE, CHARGE_RATE = 1.1, 1.3, 10.0, 25.0
 N_STOPS = 5
-
-
-def random_free_point(rng):
-    # same rule as randomFreePoint() in the sim
-    for _ in range(30):
-        px = nm.MARGIN + 30 + rng.random() * (nm.W - nm.MARGIN * 2 - 60)
-        py = nm.MARGIN + 30 + rng.random() * (nm.H - nm.MARGIN * 2 - 60)
-        if not any(ox - 20 < px < ox + ow + 20 and oy - 20 < py < oy + oh + 20 for ox, oy, ow, oh in nm.OBSTACLES):
-            return (px, py)
-    return (px, py)
-
-
-def pick_stops(rng):
-    stops = []
-    while len(stops) < N_STOPS:
-        p = random_free_point(rng)
-        # keep stops visibly distinct and away from the base pad
-        if math.dist(p, BASE) > 80 and all(math.dist(p, q) > 80 for q in stops):
-            stops.append(p)
-    return stops
-
-
-def path_length(pts):
-    return sum(math.dist(pts[i - 1], pts[i]) for i in range(1, len(pts)))
-
-
-def route_length(a, b):
-    raw = nm.astar(a[0], a[1], b[0], b[1])
-    return path_length([a, *nm.smooth_path(raw), b]) if raw else math.inf
-
-
-def energy_for(length):
-    return length / ROVER_SPEED * FLY_DRAIN * ENERGY_MARGIN
-
-
-def walk_tour(order, dist, start_charge=100.0):
-    """Estimated mission time (s) for visiting stops in `order` (1-based)."""
-    charge, at, length, charge_time, recharges = start_charge, 0, 0.0, 0.0, 0
-    for k in order:
-        need = energy_for(dist[at][k]) + energy_for(dist[k][0]) + RESERVE
-        if charge < need and charge < 99.9:
-            length += dist[at][0]
-            charge_time += (100 - max(0.0, charge - energy_for(dist[at][0]))) / CHARGE_RATE
-            charge, at, recharges = 100.0, 0, recharges + 1
-        charge -= energy_for(dist[at][k])
-        length += dist[at][k]
-        at = k
-    length += dist[at][0]
-    return length / ROVER_SPEED + charge_time, length, recharges
-
-
 rng = random.Random(SEED)
-stops = pick_stops(rng)
-pts = [BASE, *stops]
-n = len(pts)
-dist = [[0.0] * n for _ in range(n)]
-for i in range(n):
-    for j in range(i + 1, n):
-        dist[i][j] = dist[j][i] = route_length(pts[i], pts[j])
+stops = dm.pick_stops(rng, N_STOPS)
+dist = dm.distance_matrix([dm.BASE, *stops])
 
 orders = list(permutations(range(1, N_STOPS + 1)))            # 120 orders
 N_QUBITS = math.ceil(math.log2(len(orders)))                   # 7
 N_STATES = 2 ** N_QUBITS                                       # 128
-cost = [walk_tour(o, dist)[0] for o in orders] + [math.inf] * (N_STATES - len(orders))
+cost = [dm.walk_tour(o, dist)[0] for o in orders] + [math.inf] * (N_STATES - len(orders))
 
 best_cost = min(cost)
 optimal = [i for i, c in enumerate(cost) if abs(c - best_cost) < 1e-9]

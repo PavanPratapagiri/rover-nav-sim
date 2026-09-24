@@ -1,0 +1,146 @@
+{
+  "seed": 9,
+  "stops": [
+    {
+      "x": 132.76,
+      "y": 370.76
+    },
+    {
+      "x": 65.97,
+      "y": 183.54
+    },
+    {
+      "x": 519.18,
+      "y": 211.58
+    },
+    {
+      "x": 499.18,
+      "y": 316.67
+    }
+  ],
+  "qubits": 16,
+  "layers": 10,
+  "cvar_alpha": 0.2,
+  "penalty": 1.0,
+  "qubo_terms": {
+    "linear": 16,
+    "quadratic": 84
+  },
+  "circuit": {
+    "depth": 190,
+    "rzz": 817,
+    "rz": 0,
+    "rx": 16
+  },
+  "qaoa_order": [
+    3,
+    4,
+    1,
+    2
+  ],
+  "qaoa_time_s": 25.36,
+  "most_likely_order": [
+    3,
+    4,
+    1,
+    2
+  ],
+  "classical_best_time_s": 25.36,
+  "worst_time_s": 46.22,
+  "matches_classical": true,
+  "shots": 4096,
+  "valid_shots": 2101,
+  "optimal_shots": 667,
+  "mean_valid_time_s": 28.71,
+  "random_p_valid": 0.0003662109375,
+  "random_p_optimal": 3.0517578125e-05,
+  "history": [
+    {
+      "p": 1,
+      "cvar": 3.99527,
+      "p_feasible": 0.0229,
+      "p_optimal": 0.00239
+    },
+    {
+      "p": 2,
+      "cvar": 3.69294,
+      "p_feasible": 0.05018,
+      "p_optimal": 0.00643
+    },
+    {
+      "p": 3,
+      "cvar": 3.48239,
+      "p_feasible": 0.08952,
+      "p_optimal": 0.01408
+    },
+    {
+      "p": 4,
+      "cvar": 2.83267,
+      "p_feasible": 0.20075,
+      "p_optimal": 0.03725
+    },
+    {
+      "p": 5,
+      "cvar": 2.67076,
+      "p_feasible": 0.31163,
+      "p_optimal": 0.05736
+    },
+    {
+      "p": 6,
+      "cvar": 2.56525,
+      "p_feasible": 0.4073,
+      "p_optimal": 0.08157
+    },
+    {
+      "p": 7,
+      "cvar": 2.53968,
+      "p_feasible": 0.43044,
+      "p_optimal": 0.09366
+    },
+    {
+      "p": 8,
+      "cvar": 2.50808,
+      "p_feasible": 0.45784,
+      "p_optimal": 0.10862
+    },
+    {
+      "p": 9,
+      "cvar": 2.47432,
+      "p_feasible": 0.48506,
+      "p_optimal": 0.13191
+    },
+    {
+      "p": 10,
+      "cvar": 2.44467,
+      "p_feasible": 0.51719,
+      "p_optimal": 0.15551
+    }
+  ],
+  "angles": {
+    "gamma": [
+      0.0835,
+      0.05788,
+      0.13822,
+      0.42211,
+      0.55719,
+      0.63285,
+      0.64518,
+      0.82912,
+      0.94051,
+      0.91583
+    ],
+    "beta": [
+      2.2206,
+      0.14888,
+      -0.52683,
+      -0.31928,
+      -0.27655,
+      -0.23187,
+      -0.21862,
+      -0.20097,
+      -0.23012,
+      -0.15128
+    ]
+  },
+  "fidelity_vs_training": 1.0
+}

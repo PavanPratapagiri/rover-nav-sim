@@ -170,6 +170,16 @@
 
   <hr class="div">
 
+  <div>
+    <p class="block-title">QAOA DELIVERY ORDER (Qiskit, offline)</p>
+    <div class="conf-label" style="font-size:11.5px; line-height:1.6;" id="qaoaIntro"></div>
+    <div id="qaoaChart" style="margin-top:8px;"></div>
+    <div class="conf-label" id="qaoaResultLine" style="margin-top:6px; line-height:1.55;"></div>
+    <button id="btnFlyQaoa" style="margin-top:9px; width:100%;">Fly the QAOA-chosen delivery run</button>
+  </div>
+
+  <hr class="div">
+
   <div class="controls-row">
     <button class="primary" id="btnPlayPause">Pause</button>
     <button id="btnReset">Reset</button>
@@ -473,6 +483,22 @@
     oracleCalls: 329, measurements: 88,
     thresholds: [51.8, 49.5, 46.01, 43.04, 39.9],
     showcase: { iterations: 6, shots: 2048, hits: 2042, uniformPct: 1.67 }
+  };
+
+  // Real result from qiskit/qaoa_delivery_order.py, embedded verbatim.
+  // QAOA (16 qubits, 10 layers, CVaR-trained, sampled on AerSimulator)
+  // chose the visiting order for this fixed 4-stop mission from a QUBO built
+  // on the pairwise road distances. history rows: [layers, P(valid route),
+  // P(optimal route)]. Re-run the script and re-embed if the map or cost
+  // constants change — tests/stress.js checks the order is still optimal.
+  const QAOA_DELIVERY = {
+    stops: [{ x: 132.76, y: 370.76 }, { x: 65.97, y: 183.54 }, { x: 519.18, y: 211.58 }, { x: 499.18, y: 316.67 }],
+    order: [3, 4, 1, 2],
+    timeS: 25.36, classicalBestS: 25.36, worstS: 46.22, meanValidS: 28.71,
+    qubits: 16, layers: 10, quadraticTerms: 84,
+    shots: 4096, validShots: 2101, optimalShots: 667,
+    randomPValid: 0.000366, randomPOptimal: 0.000031,
+    history: [[1, 0.0229, 0.0024], [2, 0.0502, 0.0064], [3, 0.0895, 0.0141], [4, 0.2008, 0.0372], [5, 0.3116, 0.0574], [6, 0.4073, 0.0816], [7, 0.4304, 0.0937], [8, 0.4578, 0.1086], [9, 0.4851, 0.1319], [10, 0.5172, 0.1555]]
   };
 
   let destination = { x: 690, y: 400 };
@@ -1253,7 +1279,11 @@
     groverIntro: document.getElementById('groverIntro'),
     groverSteps: document.getElementById('groverSteps'),
     groverResultLine: document.getElementById('groverResultLine'),
-    btnFlyGrover: document.getElementById('btnFlyGrover')
+    btnFlyGrover: document.getElementById('btnFlyGrover'),
+    qaoaIntro: document.getElementById('qaoaIntro'),
+    qaoaChart: document.getElementById('qaoaChart'),
+    qaoaResultLine: document.getElementById('qaoaResultLine'),
+    btnFlyQaoa: document.getElementById('btnFlyQaoa')
   };
 
   const SPEEDS = [1, 2, 4];
@@ -1318,6 +1348,36 @@
     launchMission(GROVER_DELIVERY.stops.map(p => ({ ...p })),
                   { order: GROVER_DELIVERY.order.slice(), method: "Grover's search (Qiskit)" });
   });
+
+  el.btnFlyQaoa.addEventListener('click', () => {
+    stopMode = false; el.stopModeToggle.checked = false; pendingStops = [];
+    launchMission(QAOA_DELIVERY.stops.map(p => ({ ...p })),
+                  { order: QAOA_DELIVERY.order.slice(), method: 'QAOA (Qiskit)' });
+  });
+
+  (function renderQaoaPanel() {
+    const Q = QAOA_DELIVERY;
+    el.qaoaIntro.textContent = `A ${Q.stops.length}-stop mission written as a QUBO on ${Q.qubits} qubits ` +
+      `(one per stop-and-position pair), with the road distances built into the circuit. ` +
+      `Deeper circuits put more probability on valid, short routes:`;
+    // tiny bar chart: per layer count, valid-route (blue) and optimal-route (gold) probability
+    const H = 46, maxP = Math.max(...Q.history.map(r => r[1]));
+    el.qaoaChart.innerHTML = `<div style="display:flex; align-items:flex-end; gap:3px; height:${H}px;">` +
+      Q.history.map(([p, pv, po]) => `<div title="p=${p}: ${(pv * 100).toFixed(1)}% valid, ${(po * 100).toFixed(1)}% optimal"
+        style="flex:1; display:flex; align-items:flex-end; gap:1px; height:100%;">
+        <div style="flex:1; height:${(pv / maxP * 100).toFixed(1)}%; background:var(--dust); border-radius:2px 2px 0 0;"></div>
+        <div style="flex:1; height:${(po / maxP * 100).toFixed(1)}%; background:var(--gold); border-radius:2px 2px 0 0;"></div>
+      </div>`).join('') + `</div>
+      <div style="display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:10px; color:var(--muted); margin-top:3px;">
+        <span>1 layer</span><span><span style="color:var(--dust);">\u25A0</span> valid <span style="color:var(--gold);">\u25A0</span> optimal</span><span>${Q.history.length} layers</span>
+      </div>`;
+    const last = Q.history[Q.history.length - 1];
+    const x = Math.round(last[2] / Q.randomPOptimal);
+    el.qaoaResultLine.textContent = `At ${Q.layers} layers: ${(Q.validShots / Q.shots * 100).toFixed(0)}% of ${Q.shots} shots are valid routes and ` +
+      `${(Q.optimalShots / Q.shots * 100).toFixed(0)}% are the optimal one (~${x.toLocaleString()}\u00d7 random guessing). ` +
+      `Best route: ${Q.timeS.toFixed(1)}s, matching the classical optimum (worst ${Q.worstS.toFixed(0)}s). ` +
+      `A heuristic, not a speed-up at this size.`;
+  })();
 
   (function renderGroverPanel() {
     const G = GROVER_DELIVERY;
@@ -1475,9 +1535,10 @@
   }
 
   updateHUD();
-  // Shareable deep links: #grover opens straight into the Grover-chosen
-  // 5-stop run, #delivery into a random 4-stop run.
+  // Shareable deep links: #grover / #qaoa open straight into the run that
+  // algorithm chose, #delivery into a random 4-stop run.
   if (location.hash === '#grover') el.btnFlyGrover.click();
+  else if (location.hash === '#qaoa') el.btnFlyQaoa.click();
   else if (location.hash === '#delivery') el.btnRandomMission.click();
   requestAnimationFrame((t) => { lastFrame = t; frame(t); });
 })();
