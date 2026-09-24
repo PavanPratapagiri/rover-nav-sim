@@ -1,11 +1,45 @@
-# Rover/Drone Navigation Sim — Project Handoff
+# Drone Delivery Navigation Sim
 
-Built in a Claude.ai chat session across many iterations of build → test →
-find a real bug → fix → reverify. Every navigation change below was
-verified headlessly in Node before shipping (extract the `<script>`, drive
-it directly, check for crashes/stuck states/collision rates across dozens
-to hundreds of randomized trials) — not just eyeballed. That testing
-harness pattern is worth keeping if you keep iterating on the nav logic.
+A 3D drone navigation and delivery simulator that runs entirely in the
+browser, plus Qiskit experiments that apply Grover's search to delivery
+routing.
+
+**▶ [Try the live demo](https://pavanpratapagiri.github.io/rover-nav-sim/)** ·
+[jump straight into the Grover-chosen delivery run](https://pavanpratapagiri.github.io/rover-nav-sim/sim-3d/rover-sim-3d.html#grover)
+
+![The drone flying a 5-stop delivery run](docs/screenshot.png)
+
+## Features
+
+- **Path planning:** A* over an occupancy grid, line-of-sight smoothing,
+  and a simulated-annealing refinement pass.
+- **Threat avoidance:** predicts where birds, vans and rogue rovers will be
+  (velocity obstacles) and picks the safest heading that still makes
+  progress, or hovers.
+- **Wind compensation:** crabs into the wind so the ground track follows
+  the planned path.
+- **Multi-stop deliveries:** finds the visiting order with the shortest
+  estimated mission time, recharge detours included (exact for up to 7
+  stops).
+- **Battery model:** plans recharges at the base pad, and a live failsafe
+  returns home early if the drone is burning more than planned.
+- **Quantum routing demo:** Grover's search (Qiskit, 7 qubits, simulator)
+  picks the best order for a 5-stop mission out of 120 possibilities. It
+  finds the exact optimum, verified against the classical answer. At this
+  size it is a demonstration of the algorithm, not a speed-up (see below).
+- **Tested:** a seeded headless stress test flies 1,500 missions per run,
+  and every one completes.
+
+## Running it
+
+- **Sim:** open `sim-3d/rover-sim-3d.html` in any modern browser. No build
+  step. Drag to orbit, scroll to zoom, click the ground to fly somewhere.
+  Use "Random 4-stop run" or "Click adds delivery stops" for missions,
+  and the 1×/2×/4× button to change speed.
+- **Stress test:** `node tests/stress.js` (see [Testing](#testing)).
+- **Qiskit demos:** see `qiskit/` below.
+
+The rest of this README is technical notes on how it works and why.
 
 ## What's here
 
@@ -20,17 +54,16 @@ harness pattern is worth keeping if you keep iterating on the nav logic.
   rovers, delivery vans). Self-contained single HTML file, no build step —
   just open it.
 - **`qiskit/`** — a genuine Qiskit demo (Python, `AerSimulator` — local
-  simulator, NOT real IBM hardware; this sandbox's network access can't
-  reach IBM's cloud). Runs Grover's search to pick the shortest of 4
+  simulator, not real IBM hardware). Runs Grover's search to pick the shortest of 4
   candidate routes for the *current* `sim-3d` obstacle map. The winning
   route is embedded verbatim (not re-derived) in `sim-3d`'s
   `QUANTUM_RESULT` constant, flyable via the "Fly the Qiskit-selected
   route" button in that page's UI.
   **If you change the obstacle map in `sim-3d`, this script's `OBSTACLES`
   list goes stale and the embedded path can cut through a new building —
-  re-run it and re-embed the new `result.json`'s `winning_path`.** This
-  bit me once already; there's a `segmentClear`-based check in the script
-  worth reusing to verify before re-embedding.
+  re-run it and re-embed the new `result.json`'s `winning_path`.** A
+  `segmentClear`-based check in the script is worth reusing to verify
+  before re-embedding.
 - **`qiskit/grover_delivery_order.py`** — Grover's search (Dürr–Høyer
   minimum finding, 7 qubits, AerSimulator) picks the visiting order for a
   fixed 5-stop delivery mission out of all 120 orders, scored with the same
@@ -170,18 +203,22 @@ History, same harness:
 - Single agent only — no multi-drone coordination.
 - Threats drive/fly through buildings (they only bounce off the arena edge).
 
-## Natural next steps
+## Roadmap (v2)
 
 1. **QAOA for delivery ordering** — the natural quantum formulation of
    the stop-ordering problem (the Grover demo searches a precomputed cost
    table; QAOA encodes the tour cost itself in the circuit).
-2. **A real backend** — discussed in the originating chat but explicitly
-   *not* built there, for two reasons worth knowing: (a) published
-   Claude.ai artifacts can only `fetch()` `api.anthropic.com` by CSP, so a
-   backend can't be live-wired into the hosted 3D page regardless of where
-   it runs; (b) there wasn't yet a concrete job for it to do. Two ideas
-   that *would* justify one: make the Qiskit route-selection a live
-   endpoint instead of precomputed/embedded data, and multi-drone fleet
-   coordination (genuinely needs a server).
-3. Sensor noise / limited field of view.
-4. Port the new nav + missions to the iOS app (still the old 2D version).
+2. **Real IBM quantum hardware** — run the same circuits on IBM Quantum
+   and compare noisy hardware results with the simulator and the exact
+   classical optimum.
+3. **Fleet routing as a QUBO** — several drones share the stops (a
+   vehicle-routing problem), formulated for QAOA and quantum annealers.
+4. **Delivery deadlines and live orders** — orders arrive mid-mission
+   with time windows; the planner re-optimizes on the fly.
+5. **A live quantum routing backend** — a small Python service that runs
+   the quantum search on demand when a mission is planned, instead of the
+   precomputed result embedded in the page.
+6. **CI** — run `tests/stress.js` on every push.
+
+Later: sensor noise / limited field of view, and porting the new nav +
+missions to the iOS app (still the old 2D version).

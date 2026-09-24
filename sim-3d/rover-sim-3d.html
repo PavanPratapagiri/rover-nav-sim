@@ -1475,6 +1475,10 @@
   }
 
   updateHUD();
+  // Shareable deep links: #grover opens straight into the Grover-chosen
+  // 5-stop run, #delivery into a random 4-stop run.
+  if (location.hash === '#grover') el.btnFlyGrover.click();
+  else if (location.hash === '#delivery') el.btnRandomMission.click();
   requestAnimationFrame((t) => { lastFrame = t; frame(t); });
 })();
 </script>
